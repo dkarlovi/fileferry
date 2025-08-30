@@ -15,6 +15,7 @@ import (
 import (
 	"errors"
 )
+
 func resolveTargetPath(tmpl string, meta *FileMetadata) (string, error) {
 	if meta == nil {
 		return "", errors.New("no metadata")
@@ -65,9 +66,10 @@ func collapseSeparators(s, sep string) string {
 	}
 	return s
 }
+
 type FileMetadata struct {
-	TakenTime *time.Time
-	Extension string
+	TakenTime   *time.Time
+	Extension   string
 	CameraMaker string
 	CameraModel string
 }
@@ -96,8 +98,8 @@ func extractImageMetadata(path string) (*FileMetadata, error) {
 		modelStr, _ = model.StringVal()
 	}
 	return &FileMetadata{
-		TakenTime: &tm,
-		Extension: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
+		TakenTime:   &tm,
+		Extension:   strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
 		CameraMaker: makerStr,
 		CameraModel: modelStr,
 	}, nil
