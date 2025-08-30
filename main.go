@@ -265,6 +265,8 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("Loaded config: %+v\n", cfg)
+	skipped := 0
+	moved := 0
 	for _, src := range cfg.Sources {
 		fmt.Printf("Scanning %s (recurse=%v, types=%v)\n", src.Path, src.Recurse, src.Types)
 		files, err := scanFiles(src)
@@ -293,6 +295,13 @@ func main() {
 				fmt.Printf("%s: target path error: %v\n", f, err)
 				continue
 			}
+			// Skip if current path is already the target path
+			absSrc, _ := filepath.Abs(f)
+			absDst, _ := filepath.Abs(targetPath)
+			if absSrc == absDst {
+				skipped++
+				continue
+			}
 			dir := filepath.Dir(targetPath)
 			if err := os.MkdirAll(dir, 0755); err != nil {
 				fmt.Printf("%s: failed to create dir %s: %v\n", f, dir, err)
@@ -304,9 +313,12 @@ func main() {
 					fmt.Printf("%s: failed to move: %v\n", f, err)
 					continue
 				}
+				moved++
 			} else {
 				fmt.Printf("Would move %s -> %s (use --ack to actually move)\n", f, targetPath)
+				moved++
 			}
 		}
 	}
+	fmt.Printf("Summary: %d moved, %d skipped.\n", moved, skipped)
 }
