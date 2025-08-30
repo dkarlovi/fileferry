@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -19,9 +21,9 @@ func resolveTargetPath(tmpl string, meta *FileMetadata) (string, error) {
 	}
 	path := tmpl
 	if meta.TakenTime != nil {
-		path = strings.ReplaceAll(path, "{exif.taken.year}", fmt.Sprintf("%04d", meta.TakenTime.Year()))
-		path = strings.ReplaceAll(path, "{exif.taken.date}", meta.TakenTime.Format("2006-01-02"))
-		path = strings.ReplaceAll(path, "{exif.taken.datetime}", meta.TakenTime.Format("2006-01-02-15-04-05"))
+		path = strings.ReplaceAll(path, "{meta.taken.year}", fmt.Sprintf("%04d", meta.TakenTime.Year()))
+		path = strings.ReplaceAll(path, "{meta.taken.date}", meta.TakenTime.Format("2006-01-02"))
+		path = strings.ReplaceAll(path, "{meta.taken.datetime}", meta.TakenTime.Format("2006-01-02-15-04-05"))
 	}
 	path = strings.ReplaceAll(path, "{file.extension}", meta.Extension)
 	return path, nil
@@ -52,10 +54,43 @@ func extractImageMetadata(path string) (*FileMetadata, error) {
 }
 
 func extractVideoMetadata(path string) (*FileMetadata, error) {
-	// TODO: Use ffprobe or similar to extract video metadata
-	return &FileMetadata{
+	meta := &FileMetadata{
 		Extension: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
-	}, nil
+	}
+	// Call ffprobe to get creation_time
+	cmd := exec.Command("ffprobe", "-v", "quiet", "-print_format", "json", "-show_entries", "format_tags=creation_time", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return meta, nil // Return what we have, but no date
+	}
+	var ffprobe struct {
+		Format struct {
+			Tags struct {
+				CreationTime string `json:"creation_time"`
+			} `json:"tags"`
+		} `json:"format"`
+	}
+	if err := json.Unmarshal(out, &ffprobe); err != nil {
+		return meta, nil
+	}
+	if ffprobe.Format.Tags.CreationTime != "" {
+		// Try parsing in several common formats
+		layouts := []string{
+			time.RFC3339,
+			"2006-01-02T15:04:05.000000Z",
+			"2006-01-02 15:04:05",
+		}
+		var tm time.Time
+		var parseErr error
+		for _, layout := range layouts {
+			tm, parseErr = time.Parse(layout, ffprobe.Format.Tags.CreationTime)
+			if parseErr == nil {
+				meta.TakenTime = &tm
+				break
+			}
+		}
+	}
+	return meta, nil
 }
 
 type SourceConfig struct {
