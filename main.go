@@ -29,7 +29,41 @@ func resolveTargetPath(tmpl string, meta *FileMetadata) (string, error) {
 	path = strings.ReplaceAll(path, "{file.extension}", (meta.Extension))
 	path = strings.ReplaceAll(path, "{meta.camera.maker}", (meta.CameraMaker))
 	path = strings.ReplaceAll(path, "{meta.camera.model}", (meta.CameraModel))
+
+	// Normalize: collapse multiple dashes/underscores, trim before extension
+	path = normalizeSeparators(path)
 	return path, nil
+}
+
+// normalizeSeparators collapses multiple dashes/underscores and trims them before the extension
+func normalizeSeparators(path string) string {
+	// Only operate on the filename part, not the full path
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+
+	// Collapse multiple dashes/underscores into one
+	name = collapseSeparators(name, "-")
+	name = collapseSeparators(name, "_")
+
+	// Remove trailing/leading separators before the extension
+	name = strings.Trim(name, "-_ ")
+
+	// Rebuild the path
+	newBase := name + ext
+	if dir == "." || dir == "" {
+		return newBase
+	}
+	return filepath.Join(dir, newBase)
+}
+
+// collapseSeparators replaces multiple consecutive sep with a single sep
+func collapseSeparators(s, sep string) string {
+	for strings.Contains(s, sep+sep) {
+		s = strings.ReplaceAll(s, sep+sep, sep)
+	}
+	return s
 }
 type FileMetadata struct {
 	TakenTime *time.Time
@@ -73,28 +107,42 @@ func extractVideoMetadata(path string) (*FileMetadata, error) {
 	meta := &FileMetadata{
 		Extension: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
 	}
-	// Call ffprobe to get creation_time, make, and model
-	cmd := exec.Command("ffprobe", "-v", "quiet", "-print_format", "json", "-show_entries", "format_tags=creation_time:format_tags=make:format_tags=model", path)
+	// Call ffprobe to get all format tags
+	cmd := exec.Command("ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", path)
 	out, err := cmd.Output()
 	if err != nil {
 		return meta, nil // Return what we have, but no date
 	}
 	var ffprobe struct {
 		Format struct {
-			Tags struct {
-				CreationTime string `json:"creation_time"`
-				Make         string `json:"make"`
-				Model        string `json:"model"`
-			} `json:"tags"`
+			Tags map[string]string `json:"tags"`
 		} `json:"format"`
 	}
 	if err := json.Unmarshal(out, &ffprobe); err != nil {
 		return meta, nil
 	}
-	meta.CameraMaker = ffprobe.Format.Tags.Make
-	meta.CameraModel = ffprobe.Format.Tags.Model
-	if ffprobe.Format.Tags.CreationTime != "" {
-		// Try parsing in several common formats
+	tags := ffprobe.Format.Tags
+
+	// Helper to look up the first non-empty value from a list of possible tag keys
+	lookup := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := tags[k]; ok && v != "" {
+				return v
+			}
+		}
+		return ""
+	}
+
+	// Arrays of possible tag keys for each field
+	makerKeys := []string{"com.android.manufacturer", "make", "manufacturer"}
+	modelKeys := []string{"com.android.model", "model"}
+	creationTimeKeys := []string{"creation_time"}
+
+	meta.CameraMaker = lookup(makerKeys...)
+	meta.CameraModel = lookup(modelKeys...)
+
+	ct := lookup(creationTimeKeys...)
+	if ct != "" {
 		layouts := []string{
 			time.RFC3339,
 			"2006-01-02T15:04:05.000000Z",
@@ -103,7 +151,7 @@ func extractVideoMetadata(path string) (*FileMetadata, error) {
 		var tm time.Time
 		var parseErr error
 		for _, layout := range layouts {
-			tm, parseErr = time.Parse(layout, ffprobe.Format.Tags.CreationTime)
+			tm, parseErr = time.Parse(layout, ct)
 			if parseErr == nil {
 				localTm := tm.Local()
 				meta.TakenTime = &localTm
