@@ -21,7 +21,7 @@ func resolveTargetPath(tmpl string, meta *FileMetadata) (string, error) {
 	if meta.TakenTime != nil {
 		path = strings.ReplaceAll(path, "{exif.taken.year}", fmt.Sprintf("%04d", meta.TakenTime.Year()))
 		path = strings.ReplaceAll(path, "{exif.taken.date}", meta.TakenTime.Format("2006-01-02"))
-		path = strings.ReplaceAll(path, "{exif.taken.datetime}", meta.TakenTime.Format("2006-01-02_15-04-05"))
+		path = strings.ReplaceAll(path, "{exif.taken.datetime}", meta.TakenTime.Format("2006-01-02-15-04-05"))
 	}
 	path = strings.ReplaceAll(path, "{file.extension}", meta.Extension)
 	return path, nil
