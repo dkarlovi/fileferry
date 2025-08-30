@@ -21,16 +21,21 @@ func resolveTargetPath(tmpl string, meta *FileMetadata) (string, error) {
 	}
 	path := tmpl
 	if meta.TakenTime != nil {
-		path = strings.ReplaceAll(path, "{meta.taken.year}", fmt.Sprintf("%04d", meta.TakenTime.Year()))
-		path = strings.ReplaceAll(path, "{meta.taken.date}", meta.TakenTime.Format("2006-01-02"))
-		path = strings.ReplaceAll(path, "{meta.taken.datetime}", meta.TakenTime.Format("2006-01-02-15-04-05"))
+		localTime := meta.TakenTime.Local()
+		path = strings.ReplaceAll(path, "{meta.taken.year}", fmt.Sprintf("%04d", localTime.Year()))
+		path = strings.ReplaceAll(path, "{meta.taken.date}", localTime.Format("2006-01-02"))
+		path = strings.ReplaceAll(path, "{meta.taken.datetime}", localTime.Format("2006-01-02-15-04-05"))
 	}
-	path = strings.ReplaceAll(path, "{file.extension}", meta.Extension)
+	path = strings.ReplaceAll(path, "{file.extension}", (meta.Extension))
+	path = strings.ReplaceAll(path, "{meta.camera.maker}", (meta.CameraMaker))
+	path = strings.ReplaceAll(path, "{meta.camera.model}", (meta.CameraModel))
 	return path, nil
 }
 type FileMetadata struct {
 	TakenTime *time.Time
 	Extension string
+	CameraMaker string
+	CameraModel string
 }
 
 func extractImageMetadata(path string) (*FileMetadata, error) {
@@ -47,9 +52,20 @@ func extractImageMetadata(path string) (*FileMetadata, error) {
 	if err != nil {
 		return nil, err
 	}
+	maker, _ := x.Get(exif.Make)
+	model, _ := x.Get(exif.Model)
+	var makerStr, modelStr string
+	if maker != nil {
+		makerStr, _ = maker.StringVal()
+	}
+	if model != nil {
+		modelStr, _ = model.StringVal()
+	}
 	return &FileMetadata{
 		TakenTime: &tm,
 		Extension: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
+		CameraMaker: makerStr,
+		CameraModel: modelStr,
 	}, nil
 }
 
@@ -57,8 +73,8 @@ func extractVideoMetadata(path string) (*FileMetadata, error) {
 	meta := &FileMetadata{
 		Extension: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
 	}
-	// Call ffprobe to get creation_time
-	cmd := exec.Command("ffprobe", "-v", "quiet", "-print_format", "json", "-show_entries", "format_tags=creation_time", path)
+	// Call ffprobe to get creation_time, make, and model
+	cmd := exec.Command("ffprobe", "-v", "quiet", "-print_format", "json", "-show_entries", "format_tags=creation_time:format_tags=make:format_tags=model", path)
 	out, err := cmd.Output()
 	if err != nil {
 		return meta, nil // Return what we have, but no date
@@ -67,12 +83,16 @@ func extractVideoMetadata(path string) (*FileMetadata, error) {
 		Format struct {
 			Tags struct {
 				CreationTime string `json:"creation_time"`
+				Make         string `json:"make"`
+				Model        string `json:"model"`
 			} `json:"tags"`
 		} `json:"format"`
 	}
 	if err := json.Unmarshal(out, &ffprobe); err != nil {
 		return meta, nil
 	}
+	meta.CameraMaker = ffprobe.Format.Tags.Make
+	meta.CameraModel = ffprobe.Format.Tags.Model
 	if ffprobe.Format.Tags.CreationTime != "" {
 		// Try parsing in several common formats
 		layouts := []string{
@@ -85,7 +105,8 @@ func extractVideoMetadata(path string) (*FileMetadata, error) {
 		for _, layout := range layouts {
 			tm, parseErr = time.Parse(layout, ffprobe.Format.Tags.CreationTime)
 			if parseErr == nil {
-				meta.TakenTime = &tm
+				localTm := tm.Local()
+				meta.TakenTime = &localTm
 				break
 			}
 		}
