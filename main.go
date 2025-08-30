@@ -6,7 +6,41 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/rwcarlsen/goexif/exif"
 )
+type FileMetadata struct {
+	TakenTime *time.Time
+	Extension string
+}
+
+func extractImageMetadata(path string) (*FileMetadata, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	x, err := exif.Decode(f)
+	if err != nil {
+		return nil, err
+	}
+	tm, err := x.DateTime()
+	if err != nil {
+		return nil, err
+	}
+	return &FileMetadata{
+		TakenTime: &tm,
+		Extension: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
+	}, nil
+}
+
+func extractVideoMetadata(path string) (*FileMetadata, error) {
+	// TODO: Use ffprobe or similar to extract video metadata
+	return &FileMetadata{
+		Extension: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
+	}, nil
+}
 
 type SourceConfig struct {
 	Path    string   `yaml:"path"`
@@ -107,7 +141,18 @@ func main() {
 		}
 		fmt.Printf("Found %d files:\n", len(files))
 		for _, f := range files {
-			fmt.Println(f)
+			var meta *FileMetadata
+			var err error
+			if isFileType(f, []string{"image"}) {
+				meta, err = extractImageMetadata(f)
+			} else if isFileType(f, []string{"video"}) {
+				meta, err = extractVideoMetadata(f)
+			}
+			if err != nil {
+				fmt.Printf("%s: metadata error: %v\n", f, err)
+				continue
+			}
+			fmt.Printf("%s: %+v\n", f, meta)
 		}
 	}
 }
