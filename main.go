@@ -1,5 +1,15 @@
 package main
 
+type FilenameMetaRule struct {
+	Path string
+	Exp  string
+}
+
+var FilenameMetaRules = []FilenameMetaRule{
+	{Path: "meta.taken.date", Exp: `\\d{4}-\\d{2}-\\d{2}`},
+	{Path: "meta.taken.time", Exp: `\\d{2}-\\d{2}-\\d{2}`},
+}
+
 import (
 	"encoding/json"
 	"fmt"
@@ -31,24 +41,18 @@ func resolveTargetPath(tmpl string, meta *FileMetadata) (string, error) {
 	path = strings.ReplaceAll(path, "{meta.camera.maker}", (meta.CameraMaker))
 	path = strings.ReplaceAll(path, "{meta.camera.model}", (meta.CameraModel))
 
-	// Normalize: collapse multiple dashes/underscores, trim before extension
 	path = normalizeSeparators(path)
 	return path, nil
 }
 
-// normalizeSeparators collapses multiple dashes/underscores and trims them before the extension
 func normalizeSeparators(path string) string {
-	// Only operate on the filename part, not the full path
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
 	ext := filepath.Ext(base)
 	name := strings.TrimSuffix(base, ext)
-
-	// Collapse multiple dashes/underscores into one
 	name = collapseSeparators(name, "-")
 	name = collapseSeparators(name, "_")
 
-	// Remove trailing/leading separators before the extension
 	name = strings.Trim(name, "-_ ")
 
 	// Rebuild the path
@@ -168,6 +172,7 @@ type SourceConfig struct {
 	Path    string   `yaml:"path"`
 	Recurse bool     `yaml:"recurse"`
 	Types   []string `yaml:"types"`
+	FilenamePattern string `yaml:"filename_pattern,omitempty"`
 }
 
 type TargetConfig struct {
@@ -292,11 +297,68 @@ func main() {
 				fmt.Printf("%s: metadata error: %v\n", f, err)
 				continue
 			}
+			// Fallback: if meta is nil or missing date, try to parse from filename using the pattern if provided
+			if (meta == nil || meta.TakenTime == nil) && src.FilenamePattern != "" {
+				fallbackMeta := parseMetadataFromFilenamePattern(filepath.Base(f), src.FilenamePattern)
+				if meta == nil {
+					meta = fallbackMeta
+				} else if fallbackMeta != nil && fallbackMeta.TakenTime != nil {
+					meta.TakenTime = fallbackMeta.TakenTime
+				}
+			}
 			targetPath, err := resolveTargetPath(targetTmpl, meta)
 			if err != nil {
 				fmt.Printf("%s: target path error: %v\n", f, err)
 				continue
 			}
+import "regexp"
+
+// parseMetadataFromFilenamePattern uses the global FilenameMetaRules and a pattern to extract metadata from a filename
+func parseMetadataFromFilenamePattern(filename, pattern string) *FileMetadata {
+	ext := filepath.Ext(filename)
+	name := strings.TrimSuffix(filename, ext)
+	// Build a regex from the pattern and the rules
+	regexPattern := pattern
+	for _, rule := range FilenameMetaRules {
+		regexPattern = strings.ReplaceAll(regexPattern, "{"+rule.Path+"}", "(?P<"+rule.Path+">"+rule.Exp+")")
+	}
+	re, err := regexp.Compile(regexPattern)
+	if err != nil {
+		return nil
+	}
+	match := re.FindStringSubmatch(name)
+	if match == nil {
+		return nil
+	}
+	groups := make(map[string]string)
+	for i, n := range re.SubexpNames() {
+		if i > 0 && n != "" {
+			groups[n] = match[i]
+		}
+	}
+	meta := &FileMetadata{
+		Extension: strings.TrimPrefix(ext, "."),
+	}
+	// Populate supported fields from groups
+	if date, ok := groups["meta.taken.date"]; ok {
+		if t, ok2 := groups["meta.taken.time"]; ok2 {
+			tm, err := time.Parse("2006-01-02 15-04-05", date+" "+t)
+			if err == nil {
+				meta.TakenTime = &tm
+			}
+		} else {
+			tm, err := time.Parse("2006-01-02", date)
+			if err == nil {
+				meta.TakenTime = &tm
+			}
+		}
+	}
+	// Add more fields as needed
+	if meta.TakenTime != nil {
+		return meta
+	}
+	return nil
+}
 			// Skip if current path is already the target path
 			absSrc, _ := filepath.Abs(f)
 			absDst, _ := filepath.Abs(targetPath)
