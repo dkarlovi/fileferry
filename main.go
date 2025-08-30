@@ -10,6 +10,22 @@ import (
 
 	"github.com/rwcarlsen/goexif/exif"
 )
+import (
+	"errors"
+)
+func resolveTargetPath(tmpl string, meta *FileMetadata) (string, error) {
+	if meta == nil {
+		return "", errors.New("no metadata")
+	}
+	path := tmpl
+	if meta.TakenTime != nil {
+		path = strings.ReplaceAll(path, "{exif.taken.year}", fmt.Sprintf("%04d", meta.TakenTime.Year()))
+		path = strings.ReplaceAll(path, "{exif.taken.date}", meta.TakenTime.Format("2006-01-02"))
+		path = strings.ReplaceAll(path, "{exif.taken.datetime}", meta.TakenTime.Format("2006-01-02_15-04-05"))
+	}
+	path = strings.ReplaceAll(path, "{file.extension}", meta.Extension)
+	return path, nil
+}
 type FileMetadata struct {
 	TakenTime *time.Time
 	Extension string
@@ -123,10 +139,23 @@ func LoadConfig(path string) (*Config, error) {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: fileferry <config.yaml>")
+		fmt.Println("Usage: fileferry <config.yaml> [--ack]")
 		os.Exit(1)
 	}
-	cfg, err := LoadConfig(os.Args[1])
+	ack := false
+	configPath := ""
+	for _, arg := range os.Args[1:] {
+		if arg == "--ack" {
+			ack = true
+		} else if configPath == "" {
+			configPath = arg
+		}
+	}
+	if configPath == "" {
+		fmt.Println("Usage: fileferry <config.yaml> [--ack]")
+		os.Exit(1)
+	}
+	cfg, err := LoadConfig(configPath)
 	if err != nil {
 		fmt.Printf("Failed to load config: %v\n", err)
 		os.Exit(1)
@@ -143,16 +172,37 @@ func main() {
 		for _, f := range files {
 			var meta *FileMetadata
 			var err error
+			var targetTmpl string
 			if isFileType(f, []string{"image"}) {
 				meta, err = extractImageMetadata(f)
+				targetTmpl = cfg.Target.Image.Path
 			} else if isFileType(f, []string{"video"}) {
 				meta, err = extractVideoMetadata(f)
+				targetTmpl = cfg.Target.Video.Path
 			}
 			if err != nil {
 				fmt.Printf("%s: metadata error: %v\n", f, err)
 				continue
 			}
-			fmt.Printf("%s: %+v\n", f, meta)
+			targetPath, err := resolveTargetPath(targetTmpl, meta)
+			if err != nil {
+				fmt.Printf("%s: target path error: %v\n", f, err)
+				continue
+			}
+			dir := filepath.Dir(targetPath)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				fmt.Printf("%s: failed to create dir %s: %v\n", f, dir, err)
+				continue
+			}
+			if ack {
+				fmt.Printf("Moving %s -> %s\n", f, targetPath)
+				if err := os.Rename(f, targetPath); err != nil {
+					fmt.Printf("%s: failed to move: %v\n", f, err)
+					continue
+				}
+			} else {
+				fmt.Printf("Would move %s -> %s (use --ack to actually move)\n", f, targetPath)
+			}
 		}
 	}
 }
