@@ -29,7 +29,10 @@ var FilenameMetaRules = []FilenameMetaRule{
 // extractImageMetadata should be implemented elsewhere, but for now provide a stub.
 func extractImageMetadata(path string) (*FileMetadata, error) {
 	// TODO: Implement actual EXIF extraction logic
-	return &FileMetadata{}, nil
+	meta := &FileMetadata{
+		Extension: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
+	}
+	return meta, nil
 }
 
 func extractVideoMetadata(path string) (*FileMetadata, error) {
