@@ -3,18 +3,18 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/rwcarlsen/goexif/exif"
-)
-import (
+	"gopkg.in/yaml.v3"
+
 	"errors"
 	"regexp"
+
+	"github.com/rwcarlsen/goexif/exif"
 )
 
 type FilenameMetaRule struct {
@@ -170,10 +170,10 @@ func extractVideoMetadata(path string) (*FileMetadata, error) {
 }
 
 type SourceConfig struct {
-	Path            string   `yaml:"path"`
-	Recurse         bool     `yaml:"recurse"`
-	Types           []string `yaml:"types"`
-	FilenamePattern string   `yaml:"filename_pattern,omitempty"`
+	Path      string   `yaml:"path"`
+	Recurse   bool     `yaml:"recurse"`
+	Types     []string `yaml:"types"`
+	Filenames []string `yaml:"filenames,omitempty"`
 }
 
 type TargetConfig struct {
@@ -284,32 +284,58 @@ func main() {
 		}
 		fmt.Printf("Found %d files:\n", len(files))
 		for _, f := range files {
+			// 1. Prepopulate metadata from filename patterns (if provided)
 			var meta *FileMetadata
+			for _, pat := range src.Filenames {
+				meta = parseMetadataFromFilenamePattern(filepath.Base(f), pat)
+				if meta != nil {
+					break
+				}
+			}
+			// 2. Add to/override with actual file metadata
+			var actualMeta *FileMetadata
 			var err error
 			var targetTmpl string
 			if isFileType(f, []string{"image"}) {
-				meta, err = extractImageMetadata(f)
+				actualMeta, err = extractImageMetadata(f)
 				targetTmpl = cfg.Target.Image.Path
 			} else if isFileType(f, []string{"video"}) {
-				meta, err = extractVideoMetadata(f)
+				actualMeta, err = extractVideoMetadata(f)
 				targetTmpl = cfg.Target.Video.Path
 			}
 			if err != nil {
 				fmt.Printf("%s: metadata error: %v\n", f, err)
 				continue
 			}
-			// Fallback: if meta is nil or missing date, try to parse from filename using the pattern if provided
-			if (meta == nil || meta.TakenTime == nil) && src.FilenamePattern != "" {
-				fallbackMeta := parseMetadataFromFilenamePattern(filepath.Base(f), src.FilenamePattern)
+			if actualMeta != nil {
 				if meta == nil {
-					meta = fallbackMeta
-				} else if fallbackMeta != nil && fallbackMeta.TakenTime != nil {
-					meta.TakenTime = fallbackMeta.TakenTime
+					meta = actualMeta
+				} else {
+					// Override/extend fields from actualMeta
+					if actualMeta.TakenTime != nil {
+						meta.TakenTime = actualMeta.TakenTime
+					}
+					if actualMeta.Extension != "" {
+						meta.Extension = actualMeta.Extension
+					}
+					if actualMeta.CameraMaker != "" {
+						meta.CameraMaker = actualMeta.CameraMaker
+					}
+					if actualMeta.CameraModel != "" {
+						meta.CameraModel = actualMeta.CameraModel
+					}
 				}
+			}
+			if targetTmpl == "" {
+				// If not set, skip this file
+				fmt.Printf("%s: could not determine target template\n", f)
+				skipped++
+				continue
 			}
 			targetPath, err := resolveTargetPath(targetTmpl, meta)
 			if err != nil {
 				fmt.Printf("%s: target path error: %v\n", f, err)
+				skipped++
 				continue
 			}
 
@@ -323,12 +349,14 @@ func main() {
 			dir := filepath.Dir(targetPath)
 			if err := os.MkdirAll(dir, 0755); err != nil {
 				fmt.Printf("%s: failed to create dir %s: %v\n", f, dir, err)
+				skipped++
 				continue
 			}
 			if ack {
 				fmt.Printf("Moving %s -> %s\n", f, targetPath)
 				if err := os.Rename(f, targetPath); err != nil {
 					fmt.Printf("%s: failed to move: %v\n", f, err)
+					skipped++
 					continue
 				}
 				moved++
@@ -366,7 +394,6 @@ func parseMetadataFromFilenamePattern(filename, pattern string) *FileMetadata {
 	meta := &FileMetadata{
 		Extension: strings.TrimPrefix(ext, "."),
 	}
-	// Populate supported fields from groups
 	if date, ok := groups["meta.taken.date"]; ok {
 		if t, ok2 := groups["meta.taken.time"]; ok2 {
 			tm, err := time.Parse("2006-01-02 15-04-05", date+" "+t)
