@@ -1,15 +1,5 @@
 package main
 
-type FilenameMetaRule struct {
-	Path string
-	Exp  string
-}
-
-var FilenameMetaRules = []FilenameMetaRule{
-	{Path: "meta.taken.date", Exp: `\\d{4}-\\d{2}-\\d{2}`},
-	{Path: "meta.taken.time", Exp: `\\d{2}-\\d{2}-\\d{2}`},
-}
-
 import (
 	"encoding/json"
 	"fmt"
@@ -24,7 +14,18 @@ import (
 )
 import (
 	"errors"
+	"regexp"
 )
+
+type FilenameMetaRule struct {
+	Path string
+	Exp  string
+}
+
+var FilenameMetaRules = []FilenameMetaRule{
+	{Path: "meta.taken.date", Exp: `\\d{4}-\\d{2}-\\d{2}`},
+	{Path: "meta.taken.time", Exp: `\\d{2}-\\d{2}-\\d{2}`},
+}
 
 func resolveTargetPath(tmpl string, meta *FileMetadata) (string, error) {
 	if meta == nil {
@@ -169,10 +170,10 @@ func extractVideoMetadata(path string) (*FileMetadata, error) {
 }
 
 type SourceConfig struct {
-	Path    string   `yaml:"path"`
-	Recurse bool     `yaml:"recurse"`
-	Types   []string `yaml:"types"`
-	FilenamePattern string `yaml:"filename_pattern,omitempty"`
+	Path            string   `yaml:"path"`
+	Recurse         bool     `yaml:"recurse"`
+	Types           []string `yaml:"types"`
+	FilenamePattern string   `yaml:"filename_pattern,omitempty"`
 }
 
 type TargetConfig struct {
@@ -311,9 +312,35 @@ func main() {
 				fmt.Printf("%s: target path error: %v\n", f, err)
 				continue
 			}
-import "regexp"
 
-// parseMetadataFromFilenamePattern uses the global FilenameMetaRules and a pattern to extract metadata from a filename
+			// Skip if current path is already the target path
+			absSrc, _ := filepath.Abs(f)
+			absDst, _ := filepath.Abs(targetPath)
+			if absSrc == absDst {
+				skipped++
+				continue
+			}
+			dir := filepath.Dir(targetPath)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				fmt.Printf("%s: failed to create dir %s: %v\n", f, dir, err)
+				continue
+			}
+			if ack {
+				fmt.Printf("Moving %s -> %s\n", f, targetPath)
+				if err := os.Rename(f, targetPath); err != nil {
+					fmt.Printf("%s: failed to move: %v\n", f, err)
+					continue
+				}
+				moved++
+			} else {
+				fmt.Printf("Would move %s -> %s (use --ack to actually move)\n", f, targetPath)
+				moved++
+			}
+		}
+	}
+	fmt.Printf("Summary: %d moved, %d skipped.\n", moved, skipped)
+}
+
 func parseMetadataFromFilenamePattern(filename, pattern string) *FileMetadata {
 	ext := filepath.Ext(filename)
 	name := strings.TrimSuffix(filename, ext)
@@ -358,31 +385,4 @@ func parseMetadataFromFilenamePattern(filename, pattern string) *FileMetadata {
 		return meta
 	}
 	return nil
-}
-			// Skip if current path is already the target path
-			absSrc, _ := filepath.Abs(f)
-			absDst, _ := filepath.Abs(targetPath)
-			if absSrc == absDst {
-				skipped++
-				continue
-			}
-			dir := filepath.Dir(targetPath)
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				fmt.Printf("%s: failed to create dir %s: %v\n", f, dir, err)
-				continue
-			}
-			if ack {
-				fmt.Printf("Moving %s -> %s\n", f, targetPath)
-				if err := os.Rename(f, targetPath); err != nil {
-					fmt.Printf("%s: failed to move: %v\n", f, err)
-					continue
-				}
-				moved++
-			} else {
-				fmt.Printf("Would move %s -> %s (use --ack to actually move)\n", f, targetPath)
-				moved++
-			}
-		}
-	}
-	fmt.Printf("Summary: %d moved, %d skipped.\n", moved, skipped)
 }
