@@ -2,19 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
-
-	"errors"
-	"regexp"
-
-	"github.com/rwcarlsen/goexif/exif"
 )
 
 type FilenameMetaRule struct {
@@ -70,44 +65,6 @@ func collapseSeparators(s, sep string) string {
 		s = strings.ReplaceAll(s, sep+sep, sep)
 	}
 	return s
-}
-
-type FileMetadata struct {
-	TakenTime   *time.Time
-	Extension   string
-	CameraMaker string
-	CameraModel string
-}
-
-func extractImageMetadata(path string) (*FileMetadata, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	x, err := exif.Decode(f)
-	if err != nil {
-		return nil, err
-	}
-	tm, err := x.DateTime()
-	if err != nil {
-		return nil, err
-	}
-	maker, _ := x.Get(exif.Make)
-	model, _ := x.Get(exif.Model)
-	var makerStr, modelStr string
-	if maker != nil {
-		makerStr, _ = maker.StringVal()
-	}
-	if model != nil {
-		modelStr, _ = model.StringVal()
-	}
-	return &FileMetadata{
-		TakenTime:   &tm,
-		Extension:   strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
-		CameraMaker: makerStr,
-		CameraModel: modelStr,
-	}, nil
 }
 
 func extractVideoMetadata(path string) (*FileMetadata, error) {
@@ -169,27 +126,6 @@ func extractVideoMetadata(path string) (*FileMetadata, error) {
 	return meta, nil
 }
 
-type SourceConfig struct {
-	Path      string   `yaml:"path"`
-	Recurse   bool     `yaml:"recurse"`
-	Types     []string `yaml:"types"`
-	Filenames []string `yaml:"filenames,omitempty"`
-}
-
-type TargetConfig struct {
-	Image TargetPathConfig `yaml:"image"`
-	Video TargetPathConfig `yaml:"video"`
-}
-
-type TargetPathConfig struct {
-	Path string `yaml:"path"`
-}
-
-type Config struct {
-	Sources []SourceConfig `yaml:"sources"`
-	Target  TargetConfig   `yaml:"target"`
-}
-
 var imageExts = []string{".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp"}
 var videoExts = []string{".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv"}
 
@@ -233,20 +169,6 @@ func scanFiles(src SourceConfig) ([]string, error) {
 	}
 	err := filepath.Walk(src.Path, walkFn)
 	return files, err
-}
-
-func LoadConfig(path string) (*Config, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	var cfg Config
-	dec := yaml.NewDecoder(f)
-	if err := dec.Decode(&cfg); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
 }
 
 func main() {
