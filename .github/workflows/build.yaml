@@ -75,7 +75,7 @@ jobs:
                         fileferry-*.zip
 
             -   name: Attest build provenance
-                uses: actions/attest-build-provenance@v2
+                uses: actions/attest-build-provenance@v3
                 with:
                     subject-path: fileferry-${{ steps.vars.outputs.ARTIFACT_VERSION }}-*.zip
 
