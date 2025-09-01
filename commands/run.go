@@ -9,6 +9,7 @@ import (
 	ffconfig "github.com/dkarlovi/fileferry/config"
 	fffile "github.com/dkarlovi/fileferry/file"
 	"github.com/symfony-cli/console"
+	"github.com/symfony-cli/terminal"
 )
 
 var runCmd = &console.Command{
@@ -29,6 +30,9 @@ var runCmd = &console.Command{
 		moved := 0
 		errors := 0
 
+		// detect verbose mode (-v)
+		verbose := terminal.IsVerbose()
+
 		filesCh, evCh := fffile.FileIteratorWithEvents(cfg)
 
 		// consume events and print colored messages (profile and path highlighted)
@@ -46,6 +50,11 @@ var runCmd = &console.Command{
 		}()
 
 		for file := range filesCh {
+			// when verbose, show the currently scanned file
+			if verbose {
+				fmt.Fprintf(c.App.Writer, "Scanning file: <comment>%s</>\n", file.OldPath)
+			}
+
 			if file.Error != nil {
 				fmt.Fprintf(c.App.ErrWriter, "%s: %v\n", file.OldPath, file.Error)
 				errors++
