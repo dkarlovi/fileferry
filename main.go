@@ -9,8 +9,11 @@ import (
 
 func main() {
 	app := &console.Application{
-		Name:     "fileferry",
-		Usage:    "Organize media files according to config",
+		Name:  "fileferry",
+		Usage: "Organize media files according to config",
+		Flags: []console.Flag{
+			&console.StringFlag{Name: "config", Aliases: []string{"C"}, DefaultValue: "", Usage: "Path to config file (optional)"},
+		},
 		Commands: commands.Commands(),
 	}
 

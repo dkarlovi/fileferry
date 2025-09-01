@@ -16,14 +16,11 @@ var runCmd = &console.Command{
 	Name:        "run",
 	Usage:       "Execute moves according to config",
 	Description: "Scans sources and moves files according to the target template",
-	Args: []*console.Arg{
-		{Name: "config"},
-	},
 	Flags: []console.Flag{
 		&console.BoolFlag{Name: "ack", Usage: "Actually move files"},
 	},
 	Action: func(c *console.Context) error {
-		cfg, err := ffconfig.LoadConfig(c.Args().Get("config"))
+		cfg, err := ffconfig.LoadConfigPrefer(c.String("config"))
 		if err != nil {
 			return console.Exit(fmt.Sprintf("Failed to load config: %v", err), 1)
 		}

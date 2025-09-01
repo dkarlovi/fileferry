@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -56,4 +57,51 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// LoadConfigPrefer tries to load a config file using the following order:
+//  1. the provided path if non-empty,
+//  2. ./config.yaml (current working directory),
+//  3. XDG user config dir: $XDG_CONFIG_HOME/fileferry/config.yaml or
+//     on Windows the appropriate AppData path (via os.UserConfigDir()).
+//
+// The first existing file is loaded; if none found an error is returned.
+func LoadConfigPrefer(preferred string) (*Config, error) {
+	tried := []string{}
+
+	// helper to test existence
+	exists := func(p string) bool {
+		if p == "" {
+			return false
+		}
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return true
+		}
+		return false
+	}
+
+	if preferred != "" {
+		tried = append(tried, preferred)
+		if exists(preferred) {
+			return LoadConfig(preferred)
+		}
+	}
+
+	// current directory
+	cur := "config.yaml"
+	tried = append(tried, cur)
+	if exists(cur) {
+		return LoadConfig(cur)
+	}
+
+	// XDG / user config dir
+	if dir, err := os.UserConfigDir(); err == nil {
+		p := filepath.Join(dir, "fileferry", "config.yaml")
+		tried = append(tried, p)
+		if exists(p) {
+			return LoadConfig(p)
+		}
+	}
+
+	return nil, fmt.Errorf("no config file found (tried: %v)", tried)
 }
