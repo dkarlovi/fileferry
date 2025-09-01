@@ -12,7 +12,17 @@ func main() {
 		Name:  "fileferry",
 		Usage: "Organize media files according to config",
 		Flags: []console.Flag{
-			&console.StringFlag{Name: "config", Aliases: []string{"C"}, DefaultValue: "", Usage: "Path to config file (optional)"},
+			&console.StringFlag{
+				Name:         "config",
+				Aliases:      []string{"C"},
+				DefaultValue: "",
+				Usage: `Path to configuration file
+
+Lookup order (first existing path wins):
+  1) <info>--config <path></> (explicit)
+  2) <info>./config.yaml</> (current working directory)
+  3) user config dir: <info>$XDG_CONFIG_HOME/fileferry/config.yaml</> or the OS-specific user config directory (via <info>os.UserConfigDir()</>)`,
+			},
 		},
 		Commands: commands.Commands(),
 	}
