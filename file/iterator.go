@@ -1,10 +1,12 @@
-package main
+package file
 
 import (
 	"fmt"
 	"path/filepath"
 	"runtime"
 	"sync"
+
+	ffcfg "github.com/dkarlovi/fileferry/config"
 )
 
 type File struct {
@@ -15,7 +17,7 @@ type File struct {
 	Error    error         // Any error encountered during processing
 }
 
-func FileIterator(cfg *Config) <-chan File {
+func FileIterator(cfg *ffcfg.Config) <-chan File {
 	ch := make(chan File, 100) // Buffered channel for better performance
 
 	workerCount := runtime.NumCPU()
@@ -73,11 +75,11 @@ func FileIterator(cfg *Config) <-chan File {
 
 type fileJob struct {
 	path    string
-	src     SourceConfig
+	src     ffcfg.SourceConfig
 	profile string
 }
 
-func processFile(filePath string, src SourceConfig, profileName string, cfg *Config) File {
+func processFile(filePath string, src ffcfg.SourceConfig, profileName string, cfg *ffcfg.Config) File {
 	file := File{
 		OldPath: filePath,
 	}

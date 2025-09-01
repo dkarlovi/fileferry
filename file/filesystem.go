@@ -1,10 +1,12 @@
-package main
+package file
 
 import (
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+
+	ffcfg "github.com/dkarlovi/fileferry/config"
 )
 
 func resolveTargetPath(tmpl string, meta *FileMetadata) (string, error) {
@@ -74,7 +76,7 @@ func isFileType(path string, types []string) bool {
 	return false
 }
 
-func scanFiles(src SourceConfig) ([]string, error) {
+func scanFiles(src ffcfg.SourceConfig) ([]string, error) {
 	var files []string
 	walkFn := func(path string, info os.FileInfo, err error) error {
 		if err != nil {
