@@ -3,69 +3,39 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+
+	"github.com/symfony-cli/console"
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: fileferry <config.yaml> [--ack]")
-		os.Exit(1)
-	}
-	ack := false
-	configPath := ""
-	for _, arg := range os.Args[1:] {
-		if arg == "--ack" {
-			ack = true
-		} else if configPath == "" {
-			configPath = arg
-		}
-	}
-	if configPath == "" {
-		fmt.Println("Usage: fileferry <config.yaml> [--ack]")
-		os.Exit(1)
-	}
-	cfg, err := LoadConfig(configPath)
-	if err != nil {
-		fmt.Printf("Failed to load config: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("Loaded config: %+v\n", cfg)
-
-	skipped := 0
-	moved := 0
-
-	for file := range FileIterator(cfg) {
-		if file.Error != nil {
-			fmt.Printf("%s: %v\n", file.OldPath, file.Error)
-			skipped++
-			continue
-		}
-
-		if !file.ShouldOp {
-			skipped++
-			continue
-		}
-
-		if ack {
-			dir := filepath.Dir(file.NewPath)
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				fmt.Printf("%s: failed to create dir %s: %v\n", file.OldPath, dir, err)
-				skipped++
-				continue
+	app := &console.Application{
+		Name:  "fileferry",
+		Usage: "Organize media files according to config",
+		Flags: []console.Flag{
+			&console.BoolFlag{Name: "ack", Usage: "Actually move files"},
+		},
+		Commands: []*console.Command{listCmd, runCmd},
+		Action: func(ctx *console.Context) error {
+			// Default to `list` when no subcommand is provided.
+			args := ctx.Args()
+			if !args.Present() {
+				return console.ShowAppHelpAction(ctx)
 			}
 
-			fmt.Printf("Moving %s -> %s\n", file.OldPath, file.NewPath)
-			if err := os.Rename(file.OldPath, file.NewPath); err != nil {
-				fmt.Printf("%s: failed to move: %v\n", file.OldPath, err)
-				skipped++
-				continue
+			// If first argument looks like a subcommand (run or list), let the framework handle it.
+			first := args.Slice()[0]
+			if first == "run" || first == "list" {
+				return console.ShowAppHelpAction(ctx)
 			}
-			moved++
-		} else {
-			fmt.Printf("Would move %s -> %s (use --ack to actually move)\n", file.OldPath, file.NewPath)
-			moved++
-		}
+
+			// Otherwise treat the first arg as config path and run the default list behavior.
+			cfg, err := LoadConfig(first)
+			if err != nil {
+				return console.Exit(fmt.Sprintf("Failed to load config: %v", err), 1)
+			}
+			return performRun(cfg, ctx.Bool("ack"))
+		},
 	}
 
-	fmt.Printf("Summary: %d moved, %d skipped.\n", moved, skipped)
+	app.Run(os.Args)
 }
