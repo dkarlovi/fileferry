@@ -22,8 +22,8 @@ type FilenameMetaRule struct {
 }
 
 var FilenameMetaRules = []FilenameMetaRule{
-	{Path: "meta.taken.date", Exp: `\\d{4}-\\d{2}-\\d{2}`},
-	{Path: "meta.taken.time", Exp: `\\d{2}-\\d{2}-\\d{2}`},
+	{Path: "meta.taken.date", Exp: `\d{4}-\d{2}-\d{2}`},
+	{Path: "meta.taken.time", Exp: `\d{2}-\d{2}-\d{2}`},
 }
 
 // extractImageMetadata should be implemented elsewhere, but for now provide a stub.
@@ -96,24 +96,38 @@ func extractVideoMetadata(path string) (*FileMetadata, error) {
 
 func parseMetadataFromFilenamePattern(filename, pattern string) *FileMetadata {
 	ext := filepath.Ext(filename)
-	name := strings.TrimSuffix(filename, ext)
+	// We'll match against the full filename (including extension) so patterns that include
+	// the extension (e.g. "{meta.taken.date} {meta.taken.time}.mkv") work as expected.
+	input := filename
 	// Build a regex from the pattern and the rules
 	regexPattern := pattern
+	// Replace pattern tokens with named groups; group names must be valid identifiers,
+	// so convert dots to underscores (meta.taken.date -> meta_taken_date) and map back later.
+	groupMap := make(map[string]string) // groupName -> original path
 	for _, rule := range FilenameMetaRules {
-		regexPattern = strings.ReplaceAll(regexPattern, "{"+rule.Path+"}", "(?P<"+rule.Path+">"+rule.Exp+")")
+		grp := strings.ReplaceAll(rule.Path, ".", "_")
+		regexPattern = strings.ReplaceAll(regexPattern, "{"+rule.Path+"}", "(?P<"+grp+">"+rule.Exp+")")
+		groupMap[grp] = rule.Path
 	}
+	// Anchor the pattern to match the full string
+	regexPattern = "^" + regexPattern + "$"
 	re, err := regexp.Compile(regexPattern)
 	if err != nil {
 		return nil
 	}
-	match := re.FindStringSubmatch(name)
+	match := re.FindStringSubmatch(input)
 	if match == nil {
 		return nil
 	}
 	groups := make(map[string]string)
 	for i, n := range re.SubexpNames() {
 		if i > 0 && n != "" {
-			groups[n] = match[i]
+			// Map group name back to dotted path if we converted it
+			if orig, ok := groupMap[n]; ok {
+				groups[orig] = match[i]
+			} else {
+				groups[n] = match[i]
+			}
 		}
 	}
 	meta := &FileMetadata{
@@ -121,12 +135,13 @@ func parseMetadataFromFilenamePattern(filename, pattern string) *FileMetadata {
 	}
 	if date, ok := groups["meta.taken.date"]; ok {
 		if t, ok2 := groups["meta.taken.time"]; ok2 {
-			tm, err := time.Parse("2006-01-02 15-04-05", date+" "+t)
+			// the pattern uses hyphens in time (15-04-05)
+			tm, err := time.ParseInLocation("2006-01-02 15-04-05", date+" "+t, time.Local)
 			if err == nil {
 				meta.TakenTime = &tm
 			}
 		} else {
-			tm, err := time.Parse("2006-01-02", date)
+			tm, err := time.ParseInLocation("2006-01-02", date, time.Local)
 			if err == nil {
 				meta.TakenTime = &tm
 			}
