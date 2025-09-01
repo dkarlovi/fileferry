@@ -49,16 +49,16 @@ func main() {
 			continue
 		}
 
-		// Create target directory
-		dir := filepath.Dir(file.NewPath)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			fmt.Printf("%s: failed to create dir %s: %v\n", file.OldPath, dir, err)
-			skipped++
-			continue
-		}
-
 		// Perform the move operation
 		if ack {
+			// Create target directory
+			dir := filepath.Dir(file.NewPath)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				fmt.Printf("%s: failed to create dir %s: %v\n", file.OldPath, dir, err)
+				skipped++
+				continue
+			}
+
 			fmt.Printf("Moving %s -> %s\n", file.OldPath, file.NewPath)
 			if err := os.Rename(file.OldPath, file.NewPath); err != nil {
 				fmt.Printf("%s: failed to move: %v\n", file.OldPath, err)
