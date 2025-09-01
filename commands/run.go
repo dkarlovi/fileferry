@@ -39,9 +39,9 @@ var runCmd = &console.Command{
 			for ev := range evCh {
 				switch ev.EventType {
 				case "start":
-					fmt.Fprintf(c.App.Writer, "Scanning profile=<comment>%s</> <comment>%s</> (recurse=%v, types=%v)\n", ev.Profile, ev.SrcPath, ev.Recurse, ev.Types)
+					fmt.Fprintf(c.App.Writer, "Scanning profile=<info>%s</> <comment>%s</> (recurse=%v, types=%v)\n", ev.Profile, ev.SrcPath, ev.Recurse, ev.Types)
 				case "found":
-					fmt.Fprintf(c.App.Writer, "Found <comment>%d</> files in <comment>%s</>\n", ev.Found, ev.SrcPath)
+					fmt.Fprintf(c.App.Writer, "Found <warning>%d</> files in <comment>%s</>\n", ev.Found, ev.SrcPath)
 				case "error":
 					fmt.Fprintf(c.App.ErrWriter, "<fg=red>Error scanning %s: %v</>\n", ev.SrcPath, ev.Error)
 				}
