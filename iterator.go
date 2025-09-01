@@ -39,7 +39,7 @@ func FileIterator(cfg *Config) <-chan File {
 			go func() {
 				defer wg.Done()
 				for job := range filePaths {
-					file := processFile(job.path, job.src, cfg)
+					file := processFile(job.path, job.src, job.profile, cfg)
 					ch <- file
 				}
 			}()
@@ -86,7 +86,7 @@ type fileJob struct {
 }
 
 // processFile handles the metadata extraction and path resolution for a single file
-func processFile(filePath string, src SourceConfig, cfg *Config) File {
+func processFile(filePath string, src SourceConfig, profileName string, cfg *Config) File {
 	file := File{
 		OldPath: filePath,
 	}
@@ -101,24 +101,12 @@ func processFile(filePath string, src SourceConfig, cfg *Config) File {
 	}
 	// If not found, try profile-level patterns
 	if meta == nil {
-		// We don't have the profile name in this signature; determine which profile contains this source
-		for _, prof := range cfg.Profiles {
-			for _, s := range prof.Sources {
-				if s.Path == src.Path {
-					for _, pat := range prof.Patterns {
-						meta = parseMetadataFromFilenamePattern(filepath.Base(filePath), pat)
-						if meta != nil {
-							break
-						}
-					}
-					// Stop searching profiles once matched
-					if meta != nil {
-						break
-					}
+		if prof, ok := cfg.Profiles[profileName]; ok {
+			for _, pat := range prof.Patterns {
+				meta = parseMetadataFromFilenamePattern(filepath.Base(filePath), pat)
+				if meta != nil {
+					break
 				}
-			}
-			if meta != nil {
-				break
 			}
 		}
 	}
@@ -135,18 +123,9 @@ func processFile(filePath string, src SourceConfig, cfg *Config) File {
 		actualMeta, err = extractVideoMetadata(filePath)
 	}
 
-	// Determine target template from the profile that owns this source
-	for _, prof := range cfg.Profiles {
-		for _, s := range prof.Sources {
-			if s.Path == src.Path {
-				targetTmpl = prof.Target.Path
-				// If profile has no patterns, we might consider src.Filenames already tried
-				break
-			}
-		}
-		if targetTmpl != "" {
-			break
-		}
+	// Determine target template from the supplied profile name
+	if prof, ok := cfg.Profiles[profileName]; ok {
+		targetTmpl = prof.Target.Path
 	}
 
 	if err != nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -38,5 +39,22 @@ func LoadConfig(path string) (*Config, error) {
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, err
 	}
+	// Basic validation: ensure profiles have targets and source paths are unique
+	seenSources := make(map[string]string)
+	for profName, prof := range cfg.Profiles {
+		if prof.Target.Path == "" {
+			return nil, fmt.Errorf("profile %q: missing target.path", profName)
+		}
+		for _, src := range prof.Sources {
+			if src.Path == "" {
+				return nil, fmt.Errorf("profile %q: source path is empty", profName)
+			}
+			if prev, ok := seenSources[src.Path]; ok {
+				return nil, fmt.Errorf("source path %q defined in profile %q and %q", src.Path, prev, profName)
+			}
+			seenSources[src.Path] = profName
+		}
+	}
+
 	return &cfg, nil
 }
