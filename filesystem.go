@@ -36,7 +36,6 @@ func normalizeSeparators(path string) string {
 
 	name = strings.Trim(name, "-_ ")
 
-	// Rebuild the path
 	newBase := name + ext
 	if dir == "." || dir == "" {
 		return newBase

@@ -34,24 +34,19 @@ func main() {
 	skipped := 0
 	moved := 0
 
-	// Process files using the iterator
 	for file := range FileIterator(cfg) {
-		// Handle errors during file processing
 		if file.Error != nil {
 			fmt.Printf("%s: %v\n", file.OldPath, file.Error)
 			skipped++
 			continue
 		}
 
-		// Skip files that don't need operations
 		if !file.ShouldOp {
 			skipped++
 			continue
 		}
 
-		// Perform the move operation
 		if ack {
-			// Create target directory
 			dir := filepath.Dir(file.NewPath)
 			if err := os.MkdirAll(dir, 0755); err != nil {
 				fmt.Printf("%s: failed to create dir %s: %v\n", file.OldPath, dir, err)

@@ -39,7 +39,6 @@ func LoadConfig(path string) (*Config, error) {
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, err
 	}
-	// Basic validation: ensure profiles have targets and source paths are unique
 	seenSources := make(map[string]string)
 	for profName, prof := range cfg.Profiles {
 		if prof.Target.Path == "" {

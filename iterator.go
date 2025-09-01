@@ -7,7 +7,6 @@ import (
 	"sync"
 )
 
-// File represents a file to be processed with source path, target path, and operation flag
 type File struct {
 	OldPath  string        // Original file path
 	NewPath  string        // Target file path after processing
@@ -16,23 +15,19 @@ type File struct {
 	Error    error         // Any error encountered during processing
 }
 
-// FileIterator processes files from the configuration and yields File objects through a channel
 func FileIterator(cfg *Config) <-chan File {
 	ch := make(chan File, 100) // Buffered channel for better performance
 
-	// Worker pool size - use number of CPUs or a reasonable default
 	workerCount := runtime.NumCPU()
 	if workerCount > 8 {
-		workerCount = 8 // Cap at 8 workers to avoid overwhelming I/O
+		workerCount = 8
 	}
 
 	go func() {
 		defer close(ch)
 
-		// Channel for file paths to be processed
 		filePaths := make(chan fileJob, workerCount*2)
 
-		// Start worker goroutines
 		var wg sync.WaitGroup
 		for i := 0; i < workerCount; i++ {
 			wg.Add(1)
@@ -45,7 +40,6 @@ func FileIterator(cfg *Config) <-chan File {
 			}()
 		}
 
-		// Send file paths to workers
 		go func() {
 			defer close(filePaths)
 
@@ -71,27 +65,23 @@ func FileIterator(cfg *Config) <-chan File {
 			}
 		}()
 
-		// Wait for all workers to finish
 		wg.Wait()
 	}()
 
 	return ch
 }
 
-// fileJob represents a file processing job
 type fileJob struct {
 	path    string
 	src     SourceConfig
 	profile string
 }
 
-// processFile handles the metadata extraction and path resolution for a single file
 func processFile(filePath string, src SourceConfig, profileName string, cfg *Config) File {
 	file := File{
 		OldPath: filePath,
 	}
 
-	// Try to parse metadata from filename patterns: prefer source filenames, then profile patterns
 	var meta *FileMetadata
 	for _, pat := range src.Filenames {
 		meta = parseMetadataFromFilenamePattern(filepath.Base(filePath), pat)
@@ -99,7 +89,6 @@ func processFile(filePath string, src SourceConfig, profileName string, cfg *Con
 			break
 		}
 	}
-	// If not found, try profile-level patterns
 	if meta == nil {
 		if prof, ok := cfg.Profiles[profileName]; ok {
 			for _, pat := range prof.Patterns {
@@ -111,19 +100,16 @@ func processFile(filePath string, src SourceConfig, profileName string, cfg *Con
 		}
 	}
 
-	// Extract actual metadata based on file type
 	var actualMeta *FileMetadata
 	var err error
 	var targetTmpl string
 
-	// Determine file type and extract metadata
 	if isFileType(filePath, []string{"image"}) {
 		actualMeta, err = extractImageMetadata(filePath)
 	} else if isFileType(filePath, []string{"video"}) {
 		actualMeta, err = extractVideoMetadata(filePath)
 	}
 
-	// Determine target template from the supplied profile name
 	if prof, ok := cfg.Profiles[profileName]; ok {
 		targetTmpl = prof.Target.Path
 	}
@@ -133,7 +119,6 @@ func processFile(filePath string, src SourceConfig, profileName string, cfg *Con
 		return file
 	}
 
-	// Merge metadata
 	if actualMeta != nil {
 		if meta == nil {
 			meta = actualMeta
@@ -155,7 +140,6 @@ func processFile(filePath string, src SourceConfig, profileName string, cfg *Con
 
 	file.Metadata = meta
 
-	// Resolve target path
 	if targetTmpl == "" {
 		file.Error = &TargetTemplateError{Path: filePath}
 		return file
@@ -169,7 +153,6 @@ func processFile(filePath string, src SourceConfig, profileName string, cfg *Con
 
 	file.NewPath = targetPath
 
-	// Determine if operation should be performed
 	absSrc, _ := filepath.Abs(filePath)
 	absDst, _ := filepath.Abs(targetPath)
 	file.ShouldOp = absSrc != absDst
@@ -177,7 +160,6 @@ func processFile(filePath string, src SourceConfig, profileName string, cfg *Con
 	return file
 }
 
-// TargetTemplateError represents an error when target template cannot be determined
 type TargetTemplateError struct {
 	Path string
 }
