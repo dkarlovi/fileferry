@@ -2,11 +2,16 @@ package file
 
 import (
 	"encoding/json"
+	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	mp4 "github.com/abema/go-mp4"
+	mkvparse "github.com/remko/go-mkvparse"
 )
 
 type FileMetadata struct {
@@ -26,6 +31,22 @@ var FilenameMetaRules = []FilenameMetaRule{
 	{Path: "meta.taken.time", Exp: `\d{2}-\d{2}-\d{2}`},
 }
 
+// handler to capture DateUTC element from Matroska files
+type dateHandler struct {
+	mkvparse.DefaultHandler
+	found bool
+	tm    time.Time
+}
+
+func (h *dateHandler) HandleDate(id mkvparse.ElementID, v time.Time, info mkvparse.ElementInfo) error {
+	if id == mkvparse.DateUTCElement && !h.found {
+		h.found = true
+		h.tm = v
+		// return nil and let parser finish or short-circuit by returning a special error? mkvparse doesn't define short-circuit error, so we capture and let it finish
+	}
+	return nil
+}
+
 func extractImageMetadata(path string) (*FileMetadata, error) {
 	meta := &FileMetadata{
 		Extension: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
@@ -37,55 +58,90 @@ func extractVideoMetadata(path string) (*FileMetadata, error) {
 	meta := &FileMetadata{
 		Extension: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
 	}
-	cmd := exec.Command("ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", path)
-	out, err := cmd.Output()
-	if err != nil {
-		return meta, nil
-	}
-	var ffprobe struct {
-		Format struct {
-			Tags map[string]string `json:"tags"`
-		} `json:"format"`
-	}
-	if err := json.Unmarshal(out, &ffprobe); err != nil {
-		return meta, nil
-	}
-	tags := ffprobe.Format.Tags
-
-	lookup := func(keys ...string) string {
-		for _, k := range keys {
-			if v, ok := tags[k]; ok && v != "" {
-				return v
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
+	f, err := os.Open(path)
+	if err == nil {
+		defer f.Close()
+		rs := io.NewSectionReader(f, 0, 1<<62)
+		switch ext {
+		case "mp4", "m4v", "mov":
+			boxes, err2 := mp4.ExtractBoxWithPayload(rs, nil, mp4.BoxPath{mp4.BoxTypeMoov(), mp4.BoxTypeMvhd()})
+			if err2 == nil && len(boxes) > 0 {
+				if mvhd, ok := boxes[0].Payload.(*mp4.Mvhd); ok {
+					var creationSecs uint64
+					if mvhd.CreationTimeV1 != 0 {
+						creationSecs = uint64(mvhd.CreationTimeV1)
+					} else if mvhd.CreationTimeV0 != 0 {
+						creationSecs = uint64(mvhd.CreationTimeV0)
+					}
+					if creationSecs != 0 {
+						epoch1904 := time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)
+						tm := epoch1904.Add(time.Duration(creationSecs) * time.Second).Local()
+						meta.TakenTime = &tm
+					}
+				}
 			}
-		}
-		return ""
-	}
-
-	makerKeys := []string{"com.android.manufacturer", "make", "manufacturer"}
-	modelKeys := []string{"com.android.model", "model"}
-	creationTimeKeys := []string{"creation_time"}
-
-	meta.CameraMaker = lookup(makerKeys...)
-	meta.CameraModel = lookup(modelKeys...)
-
-	ct := lookup(creationTimeKeys...)
-	if ct != "" {
-		layouts := []string{
-			time.RFC3339,
-			"2006-01-02T15:04:05.000000Z",
-			"2006-01-02 15:04:05",
-		}
-		var tm time.Time
-		var parseErr error
-		for _, layout := range layouts {
-			tm, parseErr = time.Parse(layout, ct)
-			if parseErr == nil {
-				localTm := tm.Local()
+		case "mkv", "webm":
+			dh := &dateHandler{}
+			if err2 := mkvparse.Parse(rs, dh); err2 == nil && dh.found {
+				localTm := dh.tm.Local()
 				meta.TakenTime = &localTm
-				break
 			}
 		}
 	}
+
+	if meta.TakenTime == nil {
+		cmd := exec.Command("ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", path)
+		out, err := cmd.Output()
+		if err != nil {
+			return meta, nil
+		}
+		var ffprobe struct {
+			Format struct {
+				Tags map[string]string `json:"tags"`
+			} `json:"format"`
+		}
+		if err := json.Unmarshal(out, &ffprobe); err != nil {
+			return meta, nil
+		}
+		tags := ffprobe.Format.Tags
+
+		lookup := func(keys ...string) string {
+			for _, k := range keys {
+				if v, ok := tags[k]; ok && v != "" {
+					return v
+				}
+			}
+			return ""
+		}
+
+		makerKeys := []string{"com.android.manufacturer", "make", "manufacturer"}
+		modelKeys := []string{"com.android.model", "model"}
+		creationTimeKeys := []string{"creation_time"}
+
+		meta.CameraMaker = lookup(makerKeys...)
+		meta.CameraModel = lookup(modelKeys...)
+
+		ct := lookup(creationTimeKeys...)
+		if ct != "" {
+			layouts := []string{
+				time.RFC3339,
+				"2006-01-02T15:04:05.000000Z",
+				"2006-01-02 15:04:05",
+			}
+			var tm time.Time
+			var parseErr error
+			for _, layout := range layouts {
+				tm, parseErr = time.Parse(layout, ct)
+				if parseErr == nil {
+					localTm := tm.Local()
+					meta.TakenTime = &localTm
+					break
+				}
+			}
+		}
+	}
+
 	return meta, nil
 }
 

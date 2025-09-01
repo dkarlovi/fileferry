@@ -12,7 +12,13 @@ require (
 )
 
 require (
+	github.com/abema/go-mp4 v1.4.1
+	github.com/remko/go-mkvparse v0.14.0
+)
+
+require (
 	github.com/agext/levenshtein v1.2.3 // indirect
+	github.com/google/uuid v1.1.2 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
