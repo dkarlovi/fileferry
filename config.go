@@ -13,18 +13,18 @@ type SourceConfig struct {
 	Filenames []string `yaml:"filenames,omitempty"`
 }
 
-type TargetConfig struct {
-	Image TargetPathConfig `yaml:"image"`
-	Video TargetPathConfig `yaml:"video"`
-}
-
 type TargetPathConfig struct {
 	Path string `yaml:"path"`
 }
 
+type ProfileConfig struct {
+	Sources  []SourceConfig   `yaml:"sources"`
+	Patterns []string         `yaml:"patterns,omitempty"`
+	Target   TargetPathConfig `yaml:"target"`
+}
+
 type Config struct {
-	Sources []SourceConfig `yaml:"sources"`
-	Target  TargetConfig   `yaml:"target"`
+	Profiles map[string]ProfileConfig `yaml:"profiles"`
 }
 
 func LoadConfig(path string) (*Config, error) {
