@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dkarlovi/fileferry/config"
-	filepkg "github.com/dkarlovi/fileferry/file"
+	ffconfig "github.com/dkarlovi/fileferry/config"
+	fffile "github.com/dkarlovi/fileferry/file"
 	"github.com/symfony-cli/console"
 )
 
@@ -23,7 +23,7 @@ var runCmd = &console.Command{
 		&console.BoolFlag{Name: "ack", Usage: "Actually move files"},
 	},
 	Action: func(c *console.Context) error {
-		cfg, err := config.LoadConfig(c.Args().Get("config"))
+		cfg, err := ffconfig.LoadConfig(c.Args().Get("config"))
 		if err != nil {
 			return console.Exit(fmt.Sprintf("Failed to load config: %v", err), 1)
 		}
@@ -32,7 +32,23 @@ var runCmd = &console.Command{
 		moved := 0
 		errors := 0
 
-		for file := range filepkg.FileIterator(cfg) {
+		filesCh, evCh := fffile.FileIteratorWithEvents(cfg)
+
+		// consume events and print colored messages (profile and path highlighted)
+		go func() {
+			for ev := range evCh {
+				switch ev.EventType {
+				case "start":
+					fmt.Fprintf(c.App.Writer, "Scanning profile=<comment>%s</> <comment>%s</> (recurse=%v, types=%v)\n", ev.Profile, ev.SrcPath, ev.Recurse, ev.Types)
+				case "found":
+					fmt.Fprintf(c.App.Writer, "Found <comment>%d</> files in <comment>%s</>\n", ev.Found, ev.SrcPath)
+				case "error":
+					fmt.Fprintf(c.App.ErrWriter, "<fg=red>Error scanning %s: %v</>\n", ev.SrcPath, ev.Error)
+				}
+			}
+		}()
+
+		for file := range filesCh {
 			if file.Error != nil {
 				fmt.Fprintf(c.App.ErrWriter, "%s: %v\n", file.OldPath, file.Error)
 				errors++

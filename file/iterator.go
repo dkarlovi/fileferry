@@ -1,7 +1,6 @@
 package file
 
 import (
-	"fmt"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -10,15 +9,35 @@ import (
 )
 
 type File struct {
-	OldPath  string        // Original file path
-	NewPath  string        // Target file path after processing
-	ShouldOp bool          // Whether any operation should be done (true if old path differs from new path)
-	Metadata *FileMetadata // File metadata for processing
-	Error    error         // Any error encountered during processing
+	OldPath  string
+	NewPath  string
+	ShouldOp bool
+	Metadata *FileMetadata
+	Error    error
 }
 
 func FileIterator(cfg *ffcfg.Config) <-chan File {
-	ch := make(chan File, 100) // Buffered channel for better performance
+	ch, _ := FileIteratorWithEvents(cfg)
+	return ch
+}
+
+// ScanEvent is emitted by FileIteratorWithEvents for progress reporting.
+type ScanEvent struct {
+	Profile   string
+	SrcPath   string
+	Recurse   bool
+	Types     []string
+	Found     int    // number of files found (if >=0)
+	Error     error  // optional error that happened while scanning
+	EventType string // one of: "start", "found", "error"
+}
+
+// FileIteratorWithEvents returns a channel of Files and a channel of ScanEvent.
+// The file package itself does not format or print events; callers may consume
+// events and colorize/print them as desired.
+func FileIteratorWithEvents(cfg *ffcfg.Config) (<-chan File, <-chan ScanEvent) {
+	ch := make(chan File, 100)
+	evCh := make(chan ScanEvent, 100)
 
 	workerCount := runtime.NumCPU()
 	if workerCount > 8 {
@@ -27,6 +46,7 @@ func FileIterator(cfg *ffcfg.Config) <-chan File {
 
 	go func() {
 		defer close(ch)
+		defer close(evCh)
 
 		filePaths := make(chan fileJob, workerCount*2)
 
@@ -47,11 +67,10 @@ func FileIterator(cfg *ffcfg.Config) <-chan File {
 
 			for profName, prof := range cfg.Profiles {
 				for _, src := range prof.Sources {
-					fmt.Printf("Scanning profile=%s %s (recurse=%v, types=%v)\n", profName, src.Path, src.Recurse, src.Types)
+					evCh <- ScanEvent{Profile: profName, SrcPath: src.Path, Recurse: src.Recurse, Types: src.Types, EventType: "start"}
 					files, err := scanFiles(src)
 					if err != nil {
-						fmt.Printf("Error scanning %s: %v\n", src.Path, err)
-						// Send an error file to indicate scanning failed
+						evCh <- ScanEvent{Profile: profName, SrcPath: src.Path, EventType: "error", Error: err}
 						ch <- File{
 							OldPath: src.Path,
 							Error:   err,
@@ -59,7 +78,7 @@ func FileIterator(cfg *ffcfg.Config) <-chan File {
 						continue
 					}
 
-					fmt.Printf("Found %d files:\n", len(files))
+					evCh <- ScanEvent{Profile: profName, SrcPath: src.Path, Found: len(files), EventType: "found"}
 					for _, f := range files {
 						filePaths <- fileJob{path: f, src: src, profile: profName}
 					}
@@ -70,7 +89,7 @@ func FileIterator(cfg *ffcfg.Config) <-chan File {
 		wg.Wait()
 	}()
 
-	return ch
+	return ch, evCh
 }
 
 type fileJob struct {
