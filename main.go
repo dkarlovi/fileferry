@@ -20,6 +20,7 @@ func main() {
 		Usage:     "Organize media files according to config",
 		Version:   version,
 		BuildDate: buildDate,
+		Channel:   "stable",
 		Flags: []console.Flag{
 			&console.StringFlag{
 				Name:         "config",
