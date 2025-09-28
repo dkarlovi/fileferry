@@ -7,10 +7,19 @@ import (
 	"github.com/symfony-cli/console"
 )
 
+var (
+	// version is overridden at linking time
+	version = "dev"
+	// buildDate is overridden at linking time
+	buildDate string
+)
+
 func main() {
 	app := &console.Application{
-		Name:  "fileferry",
-		Usage: "Organize media files according to config",
+		Name:      "fileferry",
+		Usage:     "Organize media files according to config",
+		Version:   version,
+		BuildDate: buildDate,
 		Flags: []console.Flag{
 			&console.StringFlag{
 				Name:         "config",
