@@ -2,3 +2,4 @@ config.yaml
 fileferry
 fileferry.exe
 *.zip
+dist/
