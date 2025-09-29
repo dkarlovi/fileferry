@@ -57,12 +57,14 @@ type FileTypeRegistry struct {
 	Categories map[string][]string
 }
 
-// DefaultFileTypes provides the default registry with support for images (including RAW) and videos
+// DefaultFileTypes provides the default registry with support for images, RAW images, and videos
 var DefaultFileTypes = &FileTypeRegistry{
 	Categories: map[string][]string{
 		"image": {
 			// Standard image formats
 			".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp",
+		},
+		"image.raw": {
 			// RAW image formats
 			".dng",         // Adobe Digital Negative (universal RAW)
 			".arw",         // Sony RAW
