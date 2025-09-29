@@ -52,21 +52,48 @@ func collapseSeparators(s, sep string) string {
 	return s
 }
 
-var imageExts = []string{".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp"}
-var videoExts = []string{".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv"}
+// FileTypeRegistry defines supported file types and their extensions
+type FileTypeRegistry struct {
+	Categories map[string][]string
+}
+
+// DefaultFileTypes provides the default registry with support for images, RAW images, and videos
+var DefaultFileTypes = &FileTypeRegistry{
+	Categories: map[string][]string{
+		"image": {
+			// Standard image formats
+			".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp",
+		},
+		"image.raw": {
+			// RAW image formats
+			".dng",         // Adobe Digital Negative (universal RAW)
+			".arw",         // Sony RAW
+			".cr2", ".cr3", // Canon RAW
+			".nef", // Nikon RAW
+			".raw", // Generic RAW
+			".raf", // Fujifilm RAW
+			".orf", // Olympus RAW
+			".rw2", // Panasonic RAW
+			".pef", // Pentax RAW
+			".srw", // Samsung RAW
+			".x3f", // Sigma RAW
+		},
+		"video": {
+			".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv",
+		},
+	},
+}
 
 func isFileType(path string, types []string) bool {
+	return DefaultFileTypes.IsFileType(path, types)
+}
+
+// IsFileType checks if a file matches any of the specified types using this registry
+func (r *FileTypeRegistry) IsFileType(path string, types []string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	for _, t := range types {
-		switch t {
-		case "image":
-			for _, e := range imageExts {
-				if ext == e {
-					return true
-				}
-			}
-		case "video":
-			for _, e := range videoExts {
+		if extensions, exists := r.Categories[t]; exists {
+			for _, e := range extensions {
 				if ext == e {
 					return true
 				}
