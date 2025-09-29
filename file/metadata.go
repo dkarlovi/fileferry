@@ -12,6 +12,7 @@ import (
 
 	mp4 "github.com/abema/go-mp4"
 	mkvparse "github.com/remko/go-mkvparse"
+	"github.com/rwcarlsen/goexif/exif"
 )
 
 type FileMetadata struct {
@@ -51,7 +52,98 @@ func extractImageMetadata(path string) (*FileMetadata, error) {
 	meta := &FileMetadata{
 		Extension: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
 	}
+
+	// Try to extract EXIF data directly using Go library
+	f, err := os.Open(path)
+	if err != nil {
+		return meta, nil
+	}
+	defer f.Close()
+
+	x, err := exif.Decode(f)
+	if err == nil {
+		// Extract creation date/time
+		if tm, err := x.DateTime(); err == nil {
+			localTm := tm.Local()
+			meta.TakenTime = &localTm
+		}
+
+		// Extract camera maker
+		if maker, err := x.Get(exif.Make); err == nil {
+			if makerStr, err := maker.StringVal(); err == nil {
+				meta.CameraMaker = strings.TrimSpace(makerStr)
+			}
+		}
+
+		// Extract camera model
+		if model, err := x.Get(exif.Model); err == nil {
+			if modelStr, err := model.StringVal(); err == nil {
+				meta.CameraModel = strings.TrimSpace(modelStr)
+			}
+		}
+	}
+
+	// Fallback to exiftool if direct EXIF reading failed or didn't get all data
+	if meta.TakenTime == nil || meta.CameraMaker == "" || meta.CameraModel == "" {
+		if exiftoolMeta := extractImageMetadataWithExiftool(path); exiftoolMeta != nil {
+			if meta.TakenTime == nil && exiftoolMeta.TakenTime != nil {
+				meta.TakenTime = exiftoolMeta.TakenTime
+			}
+			if meta.CameraMaker == "" && exiftoolMeta.CameraMaker != "" {
+				meta.CameraMaker = exiftoolMeta.CameraMaker
+			}
+			if meta.CameraModel == "" && exiftoolMeta.CameraModel != "" {
+				meta.CameraModel = exiftoolMeta.CameraModel
+			}
+		}
+	}
+
 	return meta, nil
+}
+
+// extractImageMetadataWithExiftool uses exiftool command as fallback for EXIF extraction
+func extractImageMetadataWithExiftool(path string) *FileMetadata {
+	cmd := exec.Command("exiftool", "-j", "-CreateDate", "-Make", "-Model", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	var result []map[string]interface{}
+	if err := json.Unmarshal(out, &result); err != nil || len(result) == 0 {
+		return nil
+	}
+
+	data := result[0]
+	meta := &FileMetadata{}
+
+	// Extract creation date
+	if createDate, ok := data["CreateDate"].(string); ok && createDate != "" {
+		// Try different date formats that exiftool might return
+		layouts := []string{
+			"2006:01:02 15:04:05",
+			"2006-01-02 15:04:05",
+			time.RFC3339,
+		}
+		for _, layout := range layouts {
+			if tm, err := time.ParseInLocation(layout, createDate, time.Local); err == nil {
+				meta.TakenTime = &tm
+				break
+			}
+		}
+	}
+
+	// Extract camera maker
+	if make, ok := data["Make"].(string); ok {
+		meta.CameraMaker = strings.TrimSpace(make)
+	}
+
+	// Extract camera model
+	if model, ok := data["Model"].(string); ok {
+		meta.CameraModel = strings.TrimSpace(model)
+	}
+
+	return meta
 }
 
 func extractVideoMetadata(path string) (*FileMetadata, error) {
