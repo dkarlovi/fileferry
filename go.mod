@@ -7,7 +7,7 @@ toolchain go1.24.6
 require gopkg.in/yaml.v3 v3.0.1
 
 require (
-	github.com/symfony-cli/console v1.2.1
+	github.com/symfony-cli/console v1.2.2
 	github.com/symfony-cli/terminal v1.0.7
 )
 
