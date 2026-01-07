@@ -55,10 +55,10 @@ github.com/stretchr/testify v1.4.0/go.mod h1:j7eGeouHqKxXV5pUuKE4zz7dFj8WfuZ+81P
 github.com/stretchr/testify v1.8.4 h1:CcVxjf3Q8PM0mHUKJCdn+eZZtm5yQwehR5yeSVQQcUk=
 github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
 github.com/sunfish-shogi/bufseekio v0.0.0-20210207115823-a4185644b365/go.mod h1:dEzdXgvImkQ3WLI+0KQpmEx8T/C/ma9KeS3AfmU899I=
-github.com/symfony-cli/console v1.2.2 h1:bo7bluca2y+ql3FSLVs2UynrpKEGPEFiD3Dw7Kh3HjA=
-github.com/symfony-cli/console v1.2.2/go.mod h1:yAAvr2GP8YhsspTGQklUKCrtdnOFliXc8Pq++HSdPDI=
-github.com/symfony-cli/terminal v1.0.7 h1:57L9PUTE2cHfQtP8Ti8dyiiPEYlQ1NBIDpMJ3RPEGPc=
-github.com/symfony-cli/terminal v1.0.7/go.mod h1:Etv22IyeGiMoIQPPj51hX31j7xuYl1njyuAFkrvybqU=
+github.com/symfony-cli/console v1.2.3 h1:tjnzVBgomeDiSae9ZwgDw/tAbSPJdDL9NHzAVEnZZsg=
+github.com/symfony-cli/console v1.2.3/go.mod h1:yAAvr2GP8YhsspTGQklUKCrtdnOFliXc8Pq++HSdPDI=
+github.com/symfony-cli/terminal v1.0.8 h1:c8pHA0qybAym4dLHBUE0lw4fmCWPzxz3CVpH9eAHBZY=
+github.com/symfony-cli/terminal v1.0.8/go.mod h1:Etv22IyeGiMoIQPPj51hX31j7xuYl1njyuAFkrvybqU=
 golang.org/x/image v0.0.0-20211028202545-6944b10bf410/go.mod h1:023OzeP/+EPmXeapQh35lcL3II3LrY8Ic+EFFKVhULM=
 golang.org/x/sys v0.0.0-20190726091711-fc99dfbffb4e/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
