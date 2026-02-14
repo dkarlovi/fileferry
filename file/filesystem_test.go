@@ -418,7 +418,7 @@ func TestHasUnpopulatedTokens(t *testing.T) {
 		{
 			name:     "braces in filename but not a token",
 			path:     "/organized/file{123}.jpg",
-			expected: true, // {123} is a valid token pattern even if not our template token
+			expected: true, // {123} matches the pattern - conservative approach to avoid moving files with unexpected braces
 		},
 		{
 			name:     "empty path",
@@ -428,7 +428,12 @@ func TestHasUnpopulatedTokens(t *testing.T) {
 		{
 			name:     "nested braces (outer)",
 			path:     "/organized/{{nested}}/file.jpg",
-			expected: true, // {nested} is detected
+			expected: true, // {nested} is detected - the outer braces are not a complete token
+		},
+		{
+			name:     "malformed double opening braces",
+			path:     "/organized/{{}",
+			expected: true, // {{} matches the pattern as a token
 		},
 	}
 
