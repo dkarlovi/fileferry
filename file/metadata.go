@@ -23,13 +23,30 @@ type FileMetadata struct {
 }
 
 type FilenameMetaRule struct {
-	Path string
-	Exp  string
+	Path   string
+	Exp    string
+	Format string // Optional: time format for parsing (e.g., "15-04-05" for HH-MM-SS)
+}
+
+// FilenameMetaFormat represents a format variant for a metadata token
+type FilenameMetaFormat struct {
+	Specifier  string // Format specifier (e.g., "hhmmss", "hh-mm-ss")
+	Regex      string // Regex pattern to match
+	TimeLayout string // Go time layout for parsing
+}
+
+// FilenameMetaFormatVariants defines format variants for metadata tokens that support custom parsing
+var FilenameMetaFormatVariants = map[string][]FilenameMetaFormat{
+	"meta.taken.time": {
+		{Specifier: "hh-mm-ss", Regex: `\d{2}-\d{2}-\d{2}`, TimeLayout: "15-04-05"},
+		{Specifier: "hhmmss", Regex: `\d{6}`, TimeLayout: "150405"},
+		{Specifier: "hhmm", Regex: `\d{4}`, TimeLayout: "1504"},
+	},
 }
 
 var FilenameMetaRules = []FilenameMetaRule{
-	{Path: "meta.taken.date", Exp: `\d{4}-\d{2}-\d{2}`},
-	{Path: "meta.taken.time", Exp: `\d{2}-\d{2}-\d{2}`},
+	{Path: "meta.taken.date", Exp: `\d{4}-\d{2}-\d{2}`, Format: "2006-01-02"},
+	{Path: "meta.taken.time", Exp: `\d{2}-\d{2}-\d{2}`, Format: "15-04-05"},
 }
 
 // handler to capture DateUTC element from Matroska files
@@ -242,11 +259,44 @@ func parseMetadataFromFilenamePattern(filename, pattern string) *FileMetadata {
 	input := filename
 	regexPattern := pattern
 	groupMap := make(map[string]string)
-	for _, rule := range FilenameMetaRules {
-		grp := strings.ReplaceAll(rule.Path, ".", "_")
-		regexPattern = strings.ReplaceAll(regexPattern, "{"+rule.Path+"}", "(?P<"+grp+">"+rule.Exp+")")
-		groupMap[grp] = rule.Path
+	formatMap := make(map[string]string) // Maps token path to its time format
+
+	// First, handle tokens with format specifiers (e.g., {meta.taken.time:hhmmss})
+	tokenWithFormatRegex := regexp.MustCompile(`\{([^}:]+):([^}]+)\}`)
+	matches := tokenWithFormatRegex.FindAllStringSubmatch(pattern, -1)
+	for _, match := range matches {
+		fullToken := match[0]  // e.g., "{meta.taken.time:hhmmss}"
+		tokenPath := match[1]  // e.g., "meta.taken.time"
+		formatSpec := match[2] // e.g., "hhmmss"
+
+		// Check if this token supports format variants
+		if variants, ok := FilenameMetaFormatVariants[tokenPath]; ok {
+			// Find the matching format variant
+			for _, variant := range variants {
+				if variant.Specifier == formatSpec {
+					grp := strings.ReplaceAll(tokenPath, ".", "_")
+					regexPattern = strings.Replace(regexPattern, fullToken, "(?P<"+grp+">"+variant.Regex+")", 1)
+					groupMap[grp] = tokenPath
+					formatMap[tokenPath] = variant.TimeLayout
+					break
+				}
+			}
+		}
 	}
+
+	// Then, handle tokens without format specifiers (use default patterns)
+	for _, rule := range FilenameMetaRules {
+		tokenWithoutFormat := "{" + rule.Path + "}"
+		if strings.Contains(regexPattern, tokenWithoutFormat) {
+			grp := strings.ReplaceAll(rule.Path, ".", "_")
+			regexPattern = strings.ReplaceAll(regexPattern, tokenWithoutFormat, "(?P<"+grp+">"+rule.Exp+")")
+			groupMap[grp] = rule.Path
+			if rule.Format != "" {
+				formatMap[rule.Path] = rule.Format
+			}
+		}
+	}
+
 	regexPattern = "^" + regexPattern + "$"
 	re, err := regexp.Compile(regexPattern)
 	if err != nil {
@@ -270,13 +320,22 @@ func parseMetadataFromFilenamePattern(filename, pattern string) *FileMetadata {
 		Extension: strings.TrimPrefix(ext, "."),
 	}
 	if date, ok := groups["meta.taken.date"]; ok {
+		dateFormat := formatMap["meta.taken.date"]
+		if dateFormat == "" {
+			dateFormat = "2006-01-02" // default
+		}
+
 		if t, ok2 := groups["meta.taken.time"]; ok2 {
-			tm, err := time.ParseInLocation("2006-01-02 15-04-05", date+" "+t, time.Local)
+			timeFormat := formatMap["meta.taken.time"]
+			if timeFormat == "" {
+				timeFormat = "15-04-05" // default
+			}
+			tm, err := time.ParseInLocation(dateFormat+" "+timeFormat, date+" "+t, time.Local)
 			if err == nil {
 				meta.TakenTime = &tm
 			}
 		} else {
-			tm, err := time.ParseInLocation("2006-01-02", date, time.Local)
+			tm, err := time.ParseInLocation(dateFormat, date, time.Local)
 			if err == nil {
 				meta.TakenTime = &tm
 			}
