@@ -178,6 +178,12 @@ func processFile(filePath string, src ffcfg.SourceConfig, profileName string, cf
 		return file
 	}
 
+	// Check if the target path still contains unpopulated template tokens
+	if hasUnpopulatedTokens(targetPath) {
+		file.Error = &UnpopulatedTokensError{Path: filePath, TargetPath: targetPath}
+		return file
+	}
+
 	file.NewPath = targetPath
 
 	absSrc, _ := filepath.Abs(filePath)
@@ -193,4 +199,13 @@ type TargetTemplateError struct {
 
 func (e *TargetTemplateError) Error() string {
 	return "could not determine target template for " + e.Path
+}
+
+type UnpopulatedTokensError struct {
+	Path       string
+	TargetPath string
+}
+
+func (e *UnpopulatedTokensError) Error() string {
+	return "skipping file because target path contains unpopulated tokens: " + e.TargetPath
 }

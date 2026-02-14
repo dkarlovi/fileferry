@@ -43,6 +43,38 @@ func TestTargetTemplateError_Error(t *testing.T) {
 	}
 }
 
+func TestUnpopulatedTokensError_Error(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		targetPath string
+		expected   string
+	}{
+		{
+			name:       "simple unpopulated token",
+			path:       "/source/file.jpg",
+			targetPath: "/organized/{meta.taken.year}/file.jpg",
+			expected:   "skipping file because target path contains unpopulated tokens: /organized/{meta.taken.year}/file.jpg",
+		},
+		{
+			name:       "multiple unpopulated tokens",
+			path:       "/source/file.png",
+			targetPath: "/organized/{meta.taken.year}/{meta.taken.date}/{meta.taken.datetime}.png",
+			expected:   "skipping file because target path contains unpopulated tokens: /organized/{meta.taken.year}/{meta.taken.date}/{meta.taken.datetime}.png",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := &UnpopulatedTokensError{Path: tt.path, TargetPath: tt.targetPath}
+			result := err.Error()
+			if result != tt.expected {
+				t.Errorf("UnpopulatedTokensError.Error() = %q; want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestProcessFile(t *testing.T) {
 	// Create a temporary directory for test files
 	tmpDir := t.TempDir()

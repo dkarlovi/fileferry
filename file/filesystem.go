@@ -4,10 +4,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	ffcfg "github.com/dkarlovi/fileferry/config"
 )
+
+var tokenPattern = regexp.MustCompile(`\{[^}]+\}`)
 
 func resolveTargetPath(tmpl string, meta *FileMetadata) (string, error) {
 	if meta == nil {
@@ -26,6 +29,15 @@ func resolveTargetPath(tmpl string, meta *FileMetadata) (string, error) {
 
 	path = normalizeSeparators(path)
 	return path, nil
+}
+
+// hasUnpopulatedTokens checks if a path still contains unpopulated template tokens
+// It looks for patterns like {token.name} where braces are properly paired.
+// Note: This intentionally matches any {*} pattern, not just known template tokens,
+// to err on the side of caution. If a path legitimately contains curly braces,
+// the file will be skipped with a warning showing the exact path.
+func hasUnpopulatedTokens(path string) bool {
+	return tokenPattern.MatchString(path)
 }
 
 func normalizeSeparators(path string) string {
