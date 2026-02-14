@@ -52,6 +52,29 @@ profiles:
 
 Notes: filename patterns are anchored and must match the filename exactly (e.g. `2025-06-02 15-21-02.mkv`). Patterns support tokens like `{meta.taken.date}` and `{meta.taken.time}` which map to regex rules.
 
+### Custom format specifiers
+Some tokens support custom format specifiers to match different time formats. Format specifiers are specified after a colon in the token (e.g., `{meta.taken.time:hhmmss}`).
+
+Supported format specifiers for `{meta.taken.time}`:
+- `hh-mm-ss` (default): Time in format `HH-MM-SS` (e.g., `22-22-12`)
+- `hhmmss`: Time in compact format `HHMMSS` (e.g., `222212`)
+- `hhmm`: Time in hour-minute format `HHMM` (e.g., `1530`)
+
+Example using custom format specifiers:
+```yaml
+profiles:
+  Pictures:
+    sources:
+      - path: /path/to/pictures
+        recurse: false
+        types: [image]
+    patterns:
+      - "Still {meta.taken.date} {meta.taken.time:hhmmss}_1.1.1.jpg"
+    target:
+      path: /organized/{meta.taken.year}/{meta.taken.date}/{meta.taken.datetime}.{file.extension}
+```
+This pattern matches filenames like `Still 2026-01-23 222212_1.1.1.jpg` where the time `222212` represents `22:22:12`.
+
 ### Build & lint
 
 ```bash
