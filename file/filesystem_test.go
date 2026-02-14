@@ -411,14 +411,24 @@ func TestHasUnpopulatedTokens(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "braces in different parts",
-			path:     "/organized/{/test}/file.jpg",
-			expected: true,
+			name:     "unpaired braces",
+			path:     "/path/{token1}/middle}/more/{token2}",
+			expected: true, // has two valid tokens: {token1} and {token2}
+		},
+		{
+			name:     "braces in filename but not a token",
+			path:     "/organized/file{123}.jpg",
+			expected: true, // {123} is a valid token pattern even if not our template token
 		},
 		{
 			name:     "empty path",
 			path:     "",
 			expected: false,
+		},
+		{
+			name:     "nested braces (outer)",
+			path:     "/organized/{{nested}}/file.jpg",
+			expected: true, // {nested} is detected
 		},
 	}
 
