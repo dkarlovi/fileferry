@@ -17,6 +17,9 @@ var runCmd = &console.Command{
 	Name:        "run",
 	Usage:       "Execute moves according to config",
 	Description: "Scans sources and moves files according to the target template",
+	Args: []*console.Arg{
+		{Name: "profile", Optional: true, Description: "Profile name to run (optional, runs all profiles if not specified)"},
+	},
 	Flags: []console.Flag{
 		&console.BoolFlag{Name: "ack", Usage: "Actually move files"},
 	},
@@ -26,6 +29,18 @@ var runCmd = &console.Command{
 			return console.Exit(fmt.Sprintf("Failed to load config: %v", err), 1)
 		}
 
+		// Get the optional profile argument
+		profileName := ""
+		if c.Args().Len() > 0 {
+			profileName = c.Args().Get("profile")
+			// Validate that the profile exists
+			if profileName != "" {
+				if _, exists := cfg.Profiles[profileName]; !exists {
+					return console.Exit(fmt.Sprintf("Profile %q not found in config", profileName), 1)
+				}
+			}
+		}
+
 		skipped := 0
 		moved := 0
 		errors := 0
@@ -33,7 +48,7 @@ var runCmd = &console.Command{
 		// detect verbose mode (-v)
 		verbose := terminal.IsVerbose()
 
-		filesCh, evCh := fffile.FileIteratorWithEvents(cfg)
+		filesCh, evCh := fffile.FileIteratorWithEvents(cfg, profileName)
 
 		// consume events and print colored messages (profile and path highlighted)
 		go func() {

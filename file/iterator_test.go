@@ -254,7 +254,7 @@ func TestFileIteratorWithEvents(t *testing.T) {
 		},
 	}
 
-	fileCh, eventCh := FileIteratorWithEvents(cfg)
+	fileCh, eventCh := FileIteratorWithEvents(cfg, "")
 	if fileCh == nil {
 		t.Fatal("FileIteratorWithEvents() returned nil file channel")
 	}
@@ -340,7 +340,7 @@ func TestFileIteratorWithEvents_ScanError(t *testing.T) {
 		},
 	}
 
-	fileCh, eventCh := FileIteratorWithEvents(cfg)
+	fileCh, eventCh := FileIteratorWithEvents(cfg, "")
 
 	// Collect events in a separate goroutine
 	eventsDone := make(chan []ScanEvent)
@@ -388,7 +388,7 @@ func TestFileIteratorWithEvents_EmptyConfig(t *testing.T) {
 		Profiles: map[string]ffcfg.ProfileConfig{},
 	}
 
-	fileCh, eventCh := FileIteratorWithEvents(cfg)
+	fileCh, eventCh := FileIteratorWithEvents(cfg, "")
 
 	// Channels should be closed immediately
 	fileCount := 0
@@ -446,7 +446,7 @@ func TestFileIteratorWithEvents_Recursion(t *testing.T) {
 		},
 	}
 
-	fileCh, eventCh := FileIteratorWithEvents(cfg)
+	fileCh, eventCh := FileIteratorWithEvents(cfg, "")
 
 	// Consume events
 	go func() {
@@ -482,7 +482,7 @@ func TestFileIteratorWithEvents_Recursion(t *testing.T) {
 		},
 	}
 
-	fileCh2, eventCh2 := FileIteratorWithEvents(cfgNoRecurse)
+	fileCh2, eventCh2 := FileIteratorWithEvents(cfgNoRecurse, "")
 
 	// Consume events
 	go func() {
