@@ -68,6 +68,13 @@ var runCmd = &console.Command{
 			}
 
 			if file.Error != nil {
+				// Special handling for unpopulated tokens - treat as skip with warning
+				if unpopErr, ok := file.Error.(*fffile.UnpopulatedTokensError); ok {
+					fmt.Fprintf(c.App.Writer, "<fg=yellow>Warning: Skipping %s: %v</>\n", file.OldPath, unpopErr)
+					skipped++
+					continue
+				}
+				// All other errors go to stderr
 				fmt.Fprintf(c.App.ErrWriter, "%s: %v\n", file.OldPath, file.Error)
 				errors++
 				continue

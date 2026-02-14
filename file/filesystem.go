@@ -28,6 +28,11 @@ func resolveTargetPath(tmpl string, meta *FileMetadata) (string, error) {
 	return path, nil
 }
 
+// hasUnpopulatedTokens checks if a path still contains unpopulated template tokens
+func hasUnpopulatedTokens(path string) bool {
+	return strings.Contains(path, "{") && strings.Contains(path, "}")
+}
+
 func normalizeSeparators(path string) string {
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
