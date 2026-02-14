@@ -374,6 +374,64 @@ func TestResolveTargetPath(t *testing.T) {
 	}
 }
 
+func TestHasUnpopulatedTokens(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		expected bool
+	}{
+		{
+			name:     "no tokens",
+			path:     "/organized/2024/file.jpg",
+			expected: false,
+		},
+		{
+			name:     "single unpopulated token",
+			path:     "/organized/{meta.taken.year}/file.jpg",
+			expected: true,
+		},
+		{
+			name:     "multiple unpopulated tokens",
+			path:     "/organized/{meta.taken.year}/{meta.taken.date}/file.jpg",
+			expected: true,
+		},
+		{
+			name:     "token in filename",
+			path:     "/organized/{meta.taken.datetime}.jpg",
+			expected: true,
+		},
+		{
+			name:     "only opening brace",
+			path:     "/organized/{test/file.jpg",
+			expected: false,
+		},
+		{
+			name:     "only closing brace",
+			path:     "/organized/test}/file.jpg",
+			expected: false,
+		},
+		{
+			name:     "braces in different parts",
+			path:     "/organized/{/test}/file.jpg",
+			expected: true,
+		},
+		{
+			name:     "empty path",
+			path:     "",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := hasUnpopulatedTokens(tt.path)
+			if result != tt.expected {
+				t.Errorf("hasUnpopulatedTokens(%q) = %v; want %v", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
 // Note: scanFiles() is not directly tested here because it requires filesystem access.
 // It's an internal function that's tested indirectly through the FileIterator functions
 // which are used by the actual application. The logic of scanFiles is straightforward:
