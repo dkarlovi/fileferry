@@ -59,6 +59,48 @@ func TestParseMetadataFromFilenamePattern(t *testing.T) {
 			pattern:  "{meta.taken.date} {meta.taken.time}.jpg",
 			want:     nil,
 		},
+		{
+			name:     "pattern with hhmmss format specifier",
+			filename: "Still 2026-01-23 222212_1.1.1.jpg",
+			pattern:  "Still {meta.taken.date} {meta.taken.time:hhmmss}_1.1.1.jpg",
+			want: &FileMetadata{
+				TakenTime: timePtr(time.Date(2026, 1, 23, 22, 22, 12, 0, time.Local)),
+				Extension: "jpg",
+			},
+		},
+		{
+			name:     "pattern with hhmmss format - simple",
+			filename: "2023-05-15 103045.jpg",
+			pattern:  "{meta.taken.date} {meta.taken.time:hhmmss}.jpg",
+			want: &FileMetadata{
+				TakenTime: timePtr(time.Date(2023, 5, 15, 10, 30, 45, 0, time.Local)),
+				Extension: "jpg",
+			},
+		},
+		{
+			name:     "pattern with hhmm format specifier",
+			filename: "2023-05-15 1030.jpg",
+			pattern:  "{meta.taken.date} {meta.taken.time:hhmm}.jpg",
+			want: &FileMetadata{
+				TakenTime: timePtr(time.Date(2023, 5, 15, 10, 30, 0, 0, time.Local)),
+				Extension: "jpg",
+			},
+		},
+		{
+			name:     "pattern with explicit hh-mm-ss format specifier",
+			filename: "2023-05-15 10-30-45.jpg",
+			pattern:  "{meta.taken.date} {meta.taken.time:hh-mm-ss}.jpg",
+			want: &FileMetadata{
+				TakenTime: timePtr(time.Date(2023, 5, 15, 10, 30, 45, 0, time.Local)),
+				Extension: "jpg",
+			},
+		},
+		{
+			name:     "no match - wrong hhmmss format",
+			filename: "2023-05-15 10-30-45.jpg",
+			pattern:  "{meta.taken.date} {meta.taken.time:hhmmss}.jpg",
+			want:     nil,
+		},
 	}
 
 	for _, tt := range tests {

@@ -589,7 +589,7 @@ func TestFileIteratorWithEvents_ProfileFilter(t *testing.T) {
 
 	// Test filtering by "videos" profile
 	fileCh, eventCh := FileIteratorWithEvents(cfg, "videos")
-	
+
 	// Consume events
 	eventsDone := make(chan []ScanEvent)
 	go func() {
@@ -612,7 +612,7 @@ func TestFileIteratorWithEvents_ProfileFilter(t *testing.T) {
 	if len(files) != 1 {
 		t.Errorf("Expected 1 file when filtering by videos profile, got %d", len(files))
 	}
-	
+
 	if len(files) > 0 && !strings.HasSuffix(files[0].OldPath, "test.mp4") {
 		t.Errorf("Expected video file, got %s", files[0].OldPath)
 	}
@@ -626,7 +626,7 @@ func TestFileIteratorWithEvents_ProfileFilter(t *testing.T) {
 
 	// Test filtering by "images" profile
 	fileCh2, eventCh2 := FileIteratorWithEvents(cfg, "images")
-	
+
 	// Consume events
 	eventsDone2 := make(chan []ScanEvent)
 	go func() {
@@ -649,7 +649,7 @@ func TestFileIteratorWithEvents_ProfileFilter(t *testing.T) {
 	if len(files2) != 1 {
 		t.Errorf("Expected 1 file when filtering by images profile, got %d", len(files2))
 	}
-	
+
 	if len(files2) > 0 && !strings.HasSuffix(files2[0].OldPath, "test.jpg") {
 		t.Errorf("Expected image file, got %s", files2[0].OldPath)
 	}
@@ -663,7 +663,7 @@ func TestFileIteratorWithEvents_ProfileFilter(t *testing.T) {
 
 	// Test with empty profile name (should process all profiles)
 	fileCh3, eventCh3 := FileIteratorWithEvents(cfg, "")
-	
+
 	// Consume events
 	eventsDone3 := make(chan []ScanEvent)
 	go func() {
