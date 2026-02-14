@@ -3,6 +3,7 @@ package file
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	ffcfg "github.com/dkarlovi/fileferry/config"
@@ -254,7 +255,7 @@ func TestFileIteratorWithEvents(t *testing.T) {
 		},
 	}
 
-	fileCh, eventCh := FileIteratorWithEvents(cfg)
+	fileCh, eventCh := FileIteratorWithEvents(cfg, "")
 	if fileCh == nil {
 		t.Fatal("FileIteratorWithEvents() returned nil file channel")
 	}
@@ -340,7 +341,7 @@ func TestFileIteratorWithEvents_ScanError(t *testing.T) {
 		},
 	}
 
-	fileCh, eventCh := FileIteratorWithEvents(cfg)
+	fileCh, eventCh := FileIteratorWithEvents(cfg, "")
 
 	// Collect events in a separate goroutine
 	eventsDone := make(chan []ScanEvent)
@@ -388,7 +389,7 @@ func TestFileIteratorWithEvents_EmptyConfig(t *testing.T) {
 		Profiles: map[string]ffcfg.ProfileConfig{},
 	}
 
-	fileCh, eventCh := FileIteratorWithEvents(cfg)
+	fileCh, eventCh := FileIteratorWithEvents(cfg, "")
 
 	// Channels should be closed immediately
 	fileCount := 0
@@ -446,7 +447,7 @@ func TestFileIteratorWithEvents_Recursion(t *testing.T) {
 		},
 	}
 
-	fileCh, eventCh := FileIteratorWithEvents(cfg)
+	fileCh, eventCh := FileIteratorWithEvents(cfg, "")
 
 	// Consume events
 	go func() {
@@ -482,7 +483,7 @@ func TestFileIteratorWithEvents_Recursion(t *testing.T) {
 		},
 	}
 
-	fileCh2, eventCh2 := FileIteratorWithEvents(cfgNoRecurse)
+	fileCh2, eventCh2 := FileIteratorWithEvents(cfgNoRecurse, "")
 
 	// Consume events
 	go func() {
@@ -498,5 +499,168 @@ func TestFileIteratorWithEvents_Recursion(t *testing.T) {
 
 	if len(files2) != 1 {
 		t.Errorf("FileIteratorWithEvents() without recursion found %d files; want 1", len(files2))
+	}
+}
+
+func TestFileIteratorWithEvents_ProfileFilter(t *testing.T) {
+	// Create test directory structure
+	tmpDir := t.TempDir()
+	videosDir := filepath.Join(tmpDir, "videos")
+	imagesDir := filepath.Join(tmpDir, "images")
+
+	if err := os.MkdirAll(videosDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(imagesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create test files
+	videoFile := filepath.Join(videosDir, "test.mp4")
+	imageFile := filepath.Join(imagesDir, "test.jpg")
+	if err := os.WriteFile(videoFile, []byte("test"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(imageFile, []byte("test"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create config with two profiles
+	cfg := &ffcfg.Config{
+		Profiles: map[string]ffcfg.ProfileConfig{
+			"videos": {
+				Sources: []ffcfg.SourceConfig{
+					{
+						Path:    videosDir,
+						Recurse: false,
+						Types:   []string{"video"},
+					},
+				},
+				Target: ffcfg.TargetPathConfig{
+					Path: filepath.Join(tmpDir, "organized", "videos", "{file.extension}"),
+				},
+			},
+			"images": {
+				Sources: []ffcfg.SourceConfig{
+					{
+						Path:    imagesDir,
+						Recurse: false,
+						Types:   []string{"image"},
+					},
+				},
+				Target: ffcfg.TargetPathConfig{
+					Path: filepath.Join(tmpDir, "organized", "images", "{file.extension}"),
+				},
+			},
+		},
+	}
+
+	// Test filtering by "videos" profile
+	fileCh, eventCh := FileIteratorWithEvents(cfg, "videos")
+	
+	// Consume events
+	eventsDone := make(chan []ScanEvent)
+	go func() {
+		events := []ScanEvent{}
+		for ev := range eventCh {
+			events = append(events, ev)
+		}
+		eventsDone <- events
+	}()
+
+	// Collect files
+	files := []File{}
+	for f := range fileCh {
+		files = append(files, f)
+	}
+
+	events := <-eventsDone
+
+	// Verify only videos profile was processed
+	if len(files) != 1 {
+		t.Errorf("Expected 1 file when filtering by videos profile, got %d", len(files))
+	}
+	
+	if len(files) > 0 && !strings.HasSuffix(files[0].OldPath, "test.mp4") {
+		t.Errorf("Expected video file, got %s", files[0].OldPath)
+	}
+
+	// Verify events are only for videos profile
+	for _, ev := range events {
+		if ev.Profile != "videos" {
+			t.Errorf("Expected all events to be for videos profile, got event for %s", ev.Profile)
+		}
+	}
+
+	// Test filtering by "images" profile
+	fileCh2, eventCh2 := FileIteratorWithEvents(cfg, "images")
+	
+	// Consume events
+	eventsDone2 := make(chan []ScanEvent)
+	go func() {
+		events := []ScanEvent{}
+		for ev := range eventCh2 {
+			events = append(events, ev)
+		}
+		eventsDone2 <- events
+	}()
+
+	// Collect files
+	files2 := []File{}
+	for f := range fileCh2 {
+		files2 = append(files2, f)
+	}
+
+	events2 := <-eventsDone2
+
+	// Verify only images profile was processed
+	if len(files2) != 1 {
+		t.Errorf("Expected 1 file when filtering by images profile, got %d", len(files2))
+	}
+	
+	if len(files2) > 0 && !strings.HasSuffix(files2[0].OldPath, "test.jpg") {
+		t.Errorf("Expected image file, got %s", files2[0].OldPath)
+	}
+
+	// Verify events are only for images profile
+	for _, ev := range events2 {
+		if ev.Profile != "images" {
+			t.Errorf("Expected all events to be for images profile, got event for %s", ev.Profile)
+		}
+	}
+
+	// Test with empty profile name (should process all profiles)
+	fileCh3, eventCh3 := FileIteratorWithEvents(cfg, "")
+	
+	// Consume events
+	eventsDone3 := make(chan []ScanEvent)
+	go func() {
+		events := []ScanEvent{}
+		for ev := range eventCh3 {
+			events = append(events, ev)
+		}
+		eventsDone3 <- events
+	}()
+
+	// Collect files
+	files3 := []File{}
+	for f := range fileCh3 {
+		files3 = append(files3, f)
+	}
+
+	events3 := <-eventsDone3
+
+	// Verify both profiles were processed
+	if len(files3) != 2 {
+		t.Errorf("Expected 2 files when not filtering by profile, got %d", len(files3))
+	}
+
+	// Verify we got events from both profiles
+	profilesSeen := make(map[string]bool)
+	for _, ev := range events3 {
+		profilesSeen[ev.Profile] = true
+	}
+	if !profilesSeen["videos"] || !profilesSeen["images"] {
+		t.Errorf("Expected events from both profiles, got events from: %v", profilesSeen)
 	}
 }

@@ -17,7 +17,7 @@ type File struct {
 }
 
 func FileIterator(cfg *ffcfg.Config) <-chan File {
-	ch, _ := FileIteratorWithEvents(cfg)
+	ch, _ := FileIteratorWithEvents(cfg, "")
 	return ch
 }
 
@@ -35,7 +35,8 @@ type ScanEvent struct {
 // FileIteratorWithEvents returns a channel of Files and a channel of ScanEvent.
 // The file package itself does not format or print events; callers may consume
 // events and colorize/print them as desired.
-func FileIteratorWithEvents(cfg *ffcfg.Config) (<-chan File, <-chan ScanEvent) {
+// If profileName is non-empty, only that profile is processed.
+func FileIteratorWithEvents(cfg *ffcfg.Config, profileName string) (<-chan File, <-chan ScanEvent) {
 	ch := make(chan File, 100)
 	evCh := make(chan ScanEvent, 100)
 
@@ -66,6 +67,11 @@ func FileIteratorWithEvents(cfg *ffcfg.Config) (<-chan File, <-chan ScanEvent) {
 			defer close(filePaths)
 
 			for profName, prof := range cfg.Profiles {
+				// Skip this profile if profileName filter is set and doesn't match
+				if profileName != "" && profName != profileName {
+					continue
+				}
+
 				for _, src := range prof.Sources {
 					evCh <- ScanEvent{Profile: profName, SrcPath: src.Path, Recurse: src.Recurse, Types: src.Types, EventType: "start"}
 					files, err := scanFiles(src)
