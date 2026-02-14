@@ -507,7 +507,7 @@ func TestFileIteratorWithEvents_ProfileFilter(t *testing.T) {
 	tmpDir := t.TempDir()
 	videosDir := filepath.Join(tmpDir, "videos")
 	imagesDir := filepath.Join(tmpDir, "images")
-	
+
 	if err := os.MkdirAll(videosDir, 0755); err != nil {
 		t.Fatal(err)
 	}

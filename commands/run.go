@@ -30,14 +30,11 @@ var runCmd = &console.Command{
 		}
 
 		// Get the optional profile argument
-		profileName := ""
-		if c.Args().Len() > 0 {
-			profileName = c.Args().Get("profile")
-			// Validate that the profile exists
-			if profileName != "" {
-				if _, exists := cfg.Profiles[profileName]; !exists {
-					return console.Exit(fmt.Sprintf("Profile %q not found in config", profileName), 1)
-				}
+		profileName := c.Args().Get("profile")
+		// Validate that the profile exists if specified
+		if profileName != "" {
+			if _, exists := cfg.Profiles[profileName]; !exists {
+				return console.Exit(fmt.Sprintf("Profile %q not found in config", profileName), 1)
 			}
 		}
 
