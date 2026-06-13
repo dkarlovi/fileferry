@@ -191,7 +191,11 @@ func TestProcessFile(t *testing.T) {
 				}
 			}
 
-			result := processFile(tt.filePath, tt.src, tt.profileName, tt.cfg)
+			fi, statErr := os.Stat(tt.filePath)
+			if statErr != nil {
+				t.Fatalf("Failed to stat test file: %v", statErr)
+			}
+			result := processFile(&localEntry{path: tt.filePath, info: fi}, tt.src, tt.profileName, tt.cfg)
 
 			if tt.wantErr && result.Error == nil {
 				t.Error("processFile() expected error but got none")
@@ -287,7 +291,7 @@ func TestFileIteratorWithEvents(t *testing.T) {
 		},
 	}
 
-	fileCh, eventCh := FileIteratorWithEvents(cfg, "")
+	fileCh, eventCh, _ := FileIteratorWithEvents(cfg, "")
 	if fileCh == nil {
 		t.Fatal("FileIteratorWithEvents() returned nil file channel")
 	}
@@ -373,7 +377,7 @@ func TestFileIteratorWithEvents_ScanError(t *testing.T) {
 		},
 	}
 
-	fileCh, eventCh := FileIteratorWithEvents(cfg, "")
+	fileCh, eventCh, _ := FileIteratorWithEvents(cfg, "")
 
 	// Collect events in a separate goroutine
 	eventsDone := make(chan []ScanEvent)
@@ -421,7 +425,7 @@ func TestFileIteratorWithEvents_EmptyConfig(t *testing.T) {
 		Profiles: map[string]ffcfg.ProfileConfig{},
 	}
 
-	fileCh, eventCh := FileIteratorWithEvents(cfg, "")
+	fileCh, eventCh, _ := FileIteratorWithEvents(cfg, "")
 
 	// Channels should be closed immediately
 	fileCount := 0
@@ -479,7 +483,7 @@ func TestFileIteratorWithEvents_Recursion(t *testing.T) {
 		},
 	}
 
-	fileCh, eventCh := FileIteratorWithEvents(cfg, "")
+	fileCh, eventCh, _ := FileIteratorWithEvents(cfg, "")
 
 	// Consume events
 	go func() {
@@ -515,7 +519,7 @@ func TestFileIteratorWithEvents_Recursion(t *testing.T) {
 		},
 	}
 
-	fileCh2, eventCh2 := FileIteratorWithEvents(cfgNoRecurse, "")
+	fileCh2, eventCh2, _ := FileIteratorWithEvents(cfgNoRecurse, "")
 
 	// Consume events
 	go func() {
@@ -588,7 +592,7 @@ func TestFileIteratorWithEvents_ProfileFilter(t *testing.T) {
 	}
 
 	// Test filtering by "videos" profile
-	fileCh, eventCh := FileIteratorWithEvents(cfg, "videos")
+	fileCh, eventCh, _ := FileIteratorWithEvents(cfg, "videos")
 
 	// Consume events
 	eventsDone := make(chan []ScanEvent)
@@ -625,7 +629,7 @@ func TestFileIteratorWithEvents_ProfileFilter(t *testing.T) {
 	}
 
 	// Test filtering by "images" profile
-	fileCh2, eventCh2 := FileIteratorWithEvents(cfg, "images")
+	fileCh2, eventCh2, _ := FileIteratorWithEvents(cfg, "images")
 
 	// Consume events
 	eventsDone2 := make(chan []ScanEvent)
@@ -662,7 +666,7 @@ func TestFileIteratorWithEvents_ProfileFilter(t *testing.T) {
 	}
 
 	// Test with empty profile name (should process all profiles)
-	fileCh3, eventCh3 := FileIteratorWithEvents(cfg, "")
+	fileCh3, eventCh3, _ := FileIteratorWithEvents(cfg, "")
 
 	// Consume events
 	eventsDone3 := make(chan []ScanEvent)

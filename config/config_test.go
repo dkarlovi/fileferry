@@ -174,21 +174,23 @@ func TestLoadConfig_DuplicateSourcePath(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
+	// Same path AND an overlapping type ([image]) across profiles → error,
+	// because a file could be claimed (and moved) by both.
 	yamlDuplicateSource := `profiles:
-  Videos:
-    sources:
-      - path: /shared/path
-        recurse: true
-        types: [video]
-    target:
-      path: /organized/videos
   Pictures:
     sources:
       - path: /shared/path
-        recurse: false
+        recurse: true
         types: [image]
     target:
       path: /organized/pictures
+  RawPictures:
+    sources:
+      - path: /shared/path
+        recurse: false
+        types: [image, image.raw]
+    target:
+      path: /organized/raw
 `
 
 	if err := os.WriteFile(configPath, []byte(yamlDuplicateSource), 0644); err != nil {
@@ -197,10 +199,42 @@ func TestLoadConfig_DuplicateSourcePath(t *testing.T) {
 
 	_, err := LoadConfig(configPath)
 	if err == nil {
-		t.Fatal("LoadConfig() expected error for duplicate source path, got nil")
+		t.Fatal("LoadConfig() expected error for overlapping source path+type, got nil")
 	}
 	if !strings.Contains(err.Error(), "source path") || !strings.Contains(err.Error(), "defined in profile") {
 		t.Errorf("Expected error about duplicate source path, got: %v", err)
+	}
+}
+
+// Same path with disjoint types across profiles is allowed: e.g. pulling RAW
+// images and videos off one phone folder into different profiles.
+func TestLoadConfig_SamePathDisjointTypes(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	yaml := `profiles:
+  Phone:
+    sources:
+      - path: "mtp://Pixel 9 Pro/Internal shared storage/DCIM/Camera"
+        recurse: false
+        types: [image.raw]
+    target:
+      path: /organized/raw
+  PhoneVideos:
+    sources:
+      - path: "mtp://Pixel 9 Pro/Internal shared storage/DCIM/Camera"
+        recurse: false
+        types: [video]
+    target:
+      path: /organized/videos
+`
+
+	if err := os.WriteFile(configPath, []byte(yaml), 0644); err != nil {
+		t.Fatalf("Failed to create test config: %v", err)
+	}
+
+	if _, err := LoadConfig(configPath); err != nil {
+		t.Errorf("LoadConfig() should allow the same path with disjoint types, got: %v", err)
 	}
 }
 

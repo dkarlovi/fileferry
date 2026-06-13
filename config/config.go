@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/dkarlovi/fileferry/mtp"
 	"gopkg.in/yaml.v3"
 )
 
@@ -40,6 +41,9 @@ func LoadConfig(path string) (*Config, error) {
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, err
 	}
+	// Guard against the same file being processed twice: a (path, type) pair must
+	// not appear in more than one profile. The same path with disjoint types
+	// (e.g. RAW images in one profile, videos in another) is allowed.
 	seenSources := make(map[string]string)
 	for profName, prof := range cfg.Profiles {
 		if prof.Target.Path == "" {
@@ -49,10 +53,25 @@ func LoadConfig(path string) (*Config, error) {
 			if src.Path == "" {
 				return nil, fmt.Errorf("profile %q: source path is empty", profName)
 			}
-			if prev, ok := seenSources[src.Path]; ok {
-				return nil, fmt.Errorf("source path %q defined in profile %q and %q", src.Path, prev, profName)
+			// Validate MTP device URLs up front for a clear error before scanning.
+			if mtp.IsURL(src.Path) {
+				if _, _, err := mtp.ParseURL(src.Path); err != nil {
+					return nil, fmt.Errorf("profile %q: %w", profName, err)
+				}
 			}
-			seenSources[src.Path] = profName
+			// A source with no types claims the whole path; represent that with a
+			// single empty type so it still collides with any other use of the path.
+			types := src.Types
+			if len(types) == 0 {
+				types = []string{""}
+			}
+			for _, ty := range types {
+				key := src.Path + "\x00" + ty
+				if prev, ok := seenSources[key]; ok {
+					return nil, fmt.Errorf("source path %q with type %q defined in profile %q and %q", src.Path, ty, prev, profName)
+				}
+				seenSources[key] = profName
+			}
 		}
 	}
 
