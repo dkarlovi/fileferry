@@ -2,12 +2,9 @@ package file
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
-
-	ffcfg "github.com/dkarlovi/fileferry/config"
 )
 
 var tokenPattern = regexp.MustCompile(`\{[^}]+\}`)
@@ -113,25 +110,4 @@ func (r *FileTypeRegistry) IsFileType(path string, types []string) bool {
 		}
 	}
 	return false
-}
-
-func scanFiles(src ffcfg.SourceConfig) ([]string, error) {
-	var files []string
-	walkFn := func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if !src.Recurse && path != src.Path {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if isFileType(path, src.Types) {
-			files = append(files, path)
-		}
-		return nil
-	}
-	err := filepath.Walk(src.Path, walkFn)
-	return files, err
 }

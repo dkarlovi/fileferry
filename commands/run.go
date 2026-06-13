@@ -3,9 +3,6 @@ package commands
 import (
 	"fmt"
 
-	"os"
-	"path/filepath"
-
 	ffconfig "github.com/dkarlovi/fileferry/config"
 	fffile "github.com/dkarlovi/fileferry/file"
 	"github.com/symfony-cli/console"
@@ -45,7 +42,10 @@ var runCmd = &console.Command{
 		// detect verbose mode (-v)
 		verbose := terminal.IsVerbose()
 
-		filesCh, evCh := fffile.FileIteratorWithEvents(cfg, profileName)
+		filesCh, evCh, sources := fffile.FileIteratorWithEvents(cfg, profileName)
+		// Keep source sessions (e.g. an MTP device connection) alive until all
+		// moves are done; entries' Open/Delete rely on them.
+		defer sources.Close()
 
 		// consume events and print colored messages (profile and path highlighted)
 		go func() {
@@ -86,12 +86,8 @@ var runCmd = &console.Command{
 			}
 
 			if c.Bool("ack") {
-				dir := filepath.Dir(file.NewPath)
-				if err := os.MkdirAll(dir, 0755); err != nil {
-					return console.Exit(fmt.Sprintf("%s: failed to create dir %s: %v", file.OldPath, dir, err), 1)
-				}
 				fmt.Fprintf(c.App.Writer, "Moving %s -> %s\n", file.OldPath, file.NewPath)
-				if err := os.Rename(file.OldPath, file.NewPath); err != nil {
+				if err := fffile.MoveEntry(file.Entry, file.NewPath); err != nil {
 					return console.Exit(fmt.Sprintf("%s: failed to move: %v", file.OldPath, err), 1)
 				}
 				moved++
