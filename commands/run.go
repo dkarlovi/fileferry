@@ -37,6 +37,7 @@ var runCmd = &console.Command{
 
 		skipped := 0
 		moved := 0
+		deduped := 0
 		errors := 0
 
 		// detect verbose mode (-v)
@@ -87,17 +88,34 @@ var runCmd = &console.Command{
 
 			if c.Bool("ack") {
 				fmt.Fprintf(c.App.Writer, "Moving %s -> %s\n", file.OldPath, file.NewPath)
-				if err := fffile.MoveEntry(file.Entry, file.NewPath); err != nil {
+				outcome, err := fffile.MoveEntry(file.Entry, file.NewPath)
+				if err != nil {
 					return console.Exit(fmt.Sprintf("%s: failed to move: %v", file.OldPath, err), 1)
 				}
-				moved++
+				if outcome == fffile.Deduplicated {
+					fmt.Fprintf(c.App.Writer, "<fg=yellow>Duplicate: %s already exists at %s, deleted source</>\n", file.OldPath, file.NewPath)
+					deduped++
+				} else {
+					moved++
+				}
 			} else {
-				fmt.Fprintf(c.App.Writer, "Would move %s -> %s (use --ack to actually move)\n", file.OldPath, file.NewPath)
-				moved++
+				outcome, err := fffile.PreviewMove(file.Entry, file.NewPath)
+				if err != nil {
+					fmt.Fprintf(c.App.ErrWriter, "%s: %v\n", file.OldPath, err)
+					errors++
+					continue
+				}
+				if outcome == fffile.Deduplicated {
+					fmt.Fprintf(c.App.Writer, "<fg=yellow>Would skip duplicate: %s already exists at %s</>\n", file.OldPath, file.NewPath)
+					deduped++
+				} else {
+					fmt.Fprintf(c.App.Writer, "Would move %s -> %s (use --ack to actually move)\n", file.OldPath, file.NewPath)
+					moved++
+				}
 			}
 		}
 
-		fmt.Fprintf(c.App.Writer, "Summary: %d moved, %d skipped, %d errors.\n", moved, skipped, errors)
+		fmt.Fprintf(c.App.Writer, "Summary: %d moved, %d duplicates, %d skipped, %d errors.\n", moved, deduped, skipped, errors)
 		return nil
 	},
 }

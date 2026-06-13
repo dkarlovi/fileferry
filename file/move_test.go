@@ -85,8 +85,12 @@ func TestMoveEntrySuccess(t *testing.T) {
 	content := []byte("raw photo bytes")
 
 	e := &fakeEntry{name: "moved.dng", bodies: [][]byte{content, content}}
-	if err := MoveEntry(e, dest); err != nil {
+	outcome, err := MoveEntry(e, dest)
+	if err != nil {
 		t.Fatalf("MoveEntry: %v", err)
+	}
+	if outcome != Moved {
+		t.Errorf("outcome = %v; want Moved", outcome)
 	}
 
 	got, err := os.ReadFile(dest)
@@ -104,13 +108,133 @@ func TestMoveEntrySuccess(t *testing.T) {
 	}
 }
 
+func TestMoveEntryExistingDuplicateDeletesSource(t *testing.T) {
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "out", "moved.dng")
+	content := []byte("raw photo bytes")
+
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(dest, content, 0644); err != nil {
+		t.Fatalf("seed dest: %v", err)
+	}
+
+	e := &fakeEntry{name: "moved.dng", bodies: [][]byte{content}}
+	outcome, err := MoveEntry(e, dest)
+	if err != nil {
+		t.Fatalf("MoveEntry: %v", err)
+	}
+	if outcome != Deduplicated {
+		t.Errorf("outcome = %v; want Deduplicated", outcome)
+	}
+
+	if !e.deleted {
+		t.Error("source was not deleted despite matching the existing destination")
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read dest: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("dest content = %q; want %q (existing file must be left intact)", got, content)
+	}
+	if _, statErr := os.Stat(dest + ".partial"); !os.IsNotExist(statErr) {
+		t.Error("no temp file should be created when reconciling an existing duplicate")
+	}
+}
+
+func TestMoveEntryExistingDifferentContentErrors(t *testing.T) {
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "moved.dng")
+	existing := []byte("a totally different file")
+
+	if err := os.WriteFile(dest, existing, 0644); err != nil {
+		t.Fatalf("seed dest: %v", err)
+	}
+
+	e := &fakeEntry{name: "moved.dng", bodies: [][]byte{[]byte("incoming source bytes")}}
+	_, err := MoveEntry(e, dest)
+	if err == nil {
+		t.Fatal("expected error when destination exists with different content, got nil")
+	}
+	if e.deleted {
+		t.Error("source was deleted despite the destination differing")
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read dest: %v", err)
+	}
+	if string(got) != string(existing) {
+		t.Errorf("existing dest was modified: got %q; want %q", got, existing)
+	}
+}
+
+func TestPreviewMove(t *testing.T) {
+	tmpDir := t.TempDir()
+	content := []byte("raw photo bytes")
+
+	t.Run("missing destination would move", func(t *testing.T) {
+		dest := filepath.Join(tmpDir, "absent", "moved.dng")
+		e := &fakeEntry{name: "moved.dng", bodies: [][]byte{content}}
+		outcome, err := PreviewMove(e, dest)
+		if err != nil {
+			t.Fatalf("PreviewMove: %v", err)
+		}
+		if outcome != Moved {
+			t.Errorf("outcome = %v; want Moved", outcome)
+		}
+		if e.opens != 0 {
+			t.Errorf("source opened %d times; want 0 when destination is absent", e.opens)
+		}
+	})
+
+	t.Run("matching destination would dedup without touching files", func(t *testing.T) {
+		dest := filepath.Join(tmpDir, "dup.dng")
+		if err := os.WriteFile(dest, content, 0644); err != nil {
+			t.Fatalf("seed dest: %v", err)
+		}
+		e := &fakeEntry{name: "dup.dng", bodies: [][]byte{content}}
+		outcome, err := PreviewMove(e, dest)
+		if err != nil {
+			t.Fatalf("PreviewMove: %v", err)
+		}
+		if outcome != Deduplicated {
+			t.Errorf("outcome = %v; want Deduplicated", outcome)
+		}
+		if e.deleted {
+			t.Error("PreviewMove must not delete the source")
+		}
+	})
+
+	t.Run("differing destination errors without touching files", func(t *testing.T) {
+		dest := filepath.Join(tmpDir, "conflict.dng")
+		existing := []byte("a totally different file")
+		if err := os.WriteFile(dest, existing, 0644); err != nil {
+			t.Fatalf("seed dest: %v", err)
+		}
+		e := &fakeEntry{name: "conflict.dng", bodies: [][]byte{content}}
+		_, err := PreviewMove(e, dest)
+		if err == nil {
+			t.Fatal("expected error for differing destination, got nil")
+		}
+		if e.deleted {
+			t.Error("PreviewMove must not delete the source")
+		}
+		got, _ := os.ReadFile(dest)
+		if string(got) != string(existing) {
+			t.Errorf("existing dest modified: got %q; want %q", got, existing)
+		}
+	})
+}
+
 func TestMoveEntryHashMismatchDoesNotDelete(t *testing.T) {
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "moved.dng")
 
 	// First Open (copy) and second Open (verify re-read) differ → corruption.
 	e := &fakeEntry{name: "moved.dng", bodies: [][]byte{[]byte("good-copy-bytes"), []byte("DIFFERENT-bytes")}}
-	err := MoveEntry(e, dest)
+	_, err := MoveEntry(e, dest)
 	if err == nil {
 		t.Fatal("expected verification error, got nil")
 	}
