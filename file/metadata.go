@@ -92,28 +92,19 @@ func extractImageMetadata(path string) (*FileMetadata, error) {
 func extractImageMetadataFromEntry(e Entry) (*FileMetadata, error) {
 	meta := &FileMetadata{Extension: normalizeExt(filepath.Ext(e.Name()))}
 
-	rc, err := e.Open()
-	if err == nil {
+	if isHEIF(meta.Extension) {
+		// HEIC/HEIF keeps its EXIF in a container item rather than at the head
+		// of the file, so it needs random access to locate it.
+		if ra, size, cleanup, err := asReaderAt(e); err == nil {
+			defer cleanup()
+			if r, err := heicExifReader(ra, size); err == nil {
+				applyExif(r, meta)
+			}
+		}
+	} else if rc, err := e.Open(); err == nil {
 		func() {
 			defer rc.Close()
-			x, err := exif.Decode(rc)
-			if err != nil {
-				return
-			}
-			if tm, err := x.DateTime(); err == nil {
-				localTm := tm.Local()
-				meta.TakenTime = &localTm
-			}
-			if maker, err := x.Get(exif.Make); err == nil {
-				if makerStr, err := maker.StringVal(); err == nil {
-					meta.CameraMaker = strings.TrimSpace(makerStr)
-				}
-			}
-			if model, err := x.Get(exif.Model); err == nil {
-				if modelStr, err := model.StringVal(); err == nil {
-					meta.CameraModel = strings.TrimSpace(modelStr)
-				}
-			}
+			applyExif(rc, meta)
 		}()
 	}
 
@@ -136,6 +127,38 @@ func extractImageMetadataFromEntry(e Entry) (*FileMetadata, error) {
 	}
 
 	return meta, nil
+}
+
+// isHEIF reports whether a normalized extension is an ISO-BMFF still image.
+func isHEIF(ext string) bool {
+	switch ext {
+	case "heic", "heif":
+		return true
+	}
+	return false
+}
+
+// applyExif decodes an EXIF/TIFF stream and fills the fields it can find,
+// leaving meta untouched when the stream carries no usable EXIF.
+func applyExif(r io.Reader, meta *FileMetadata) {
+	x, err := exif.Decode(r)
+	if err != nil {
+		return
+	}
+	if tm, err := x.DateTime(); err == nil {
+		localTm := tm.Local()
+		meta.TakenTime = &localTm
+	}
+	if maker, err := x.Get(exif.Make); err == nil {
+		if makerStr, err := maker.StringVal(); err == nil {
+			meta.CameraMaker = strings.TrimSpace(makerStr)
+		}
+	}
+	if model, err := x.Get(exif.Model); err == nil {
+		if modelStr, err := model.StringVal(); err == nil {
+			meta.CameraModel = strings.TrimSpace(modelStr)
+		}
+	}
 }
 
 // extractImageMetadataWithExiftool uses exiftool command as fallback for EXIF extraction

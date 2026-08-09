@@ -93,7 +93,7 @@ var runCmd = &console.Command{
 					// A single file failing to move (e.g. a destination that exists
 					// with different content) must not abort the whole run: record it
 					// and keep going with the remaining files.
-					fmt.Fprintf(c.App.ErrWriter, "%s: failed to move: %v\n", file.OldPath, err)
+					fmt.Fprintf(c.App.ErrWriter, "<error>%s: failed to move: %v</>\n", file.OldPath, err)
 					errors++
 					continue
 				}

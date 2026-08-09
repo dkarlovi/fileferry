@@ -72,6 +72,7 @@ var DefaultFileTypes = &FileTypeRegistry{
 		"image": {
 			// Standard image formats
 			".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp",
+			".heic", ".heif", // Apple/HEIF still images
 		},
 		"image.raw": {
 			// RAW image formats

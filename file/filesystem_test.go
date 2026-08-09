@@ -249,6 +249,12 @@ func TestIsFileType(t *testing.T) {
 			expected: false,
 		},
 		{
+			name:     "heic is image",
+			path:     "IMG_4586.HEIC",
+			types:    []string{"image"},
+			expected: true,
+		},
+		{
 			name:     "legacy 3gp is video",
 			path:     "clip.3gp",
 			types:    []string{"video"},
