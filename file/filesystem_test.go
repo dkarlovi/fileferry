@@ -237,6 +237,24 @@ func TestIsFileType(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "image is a superset of image.raw",
+			path:     "photo.dng",
+			types:    []string{"image"},
+			expected: true,
+		},
+		{
+			name:     "image.raw does not match standard images",
+			path:     "photo.jpg",
+			types:    []string{"image.raw"},
+			expected: false,
+		},
+		{
+			name:     "legacy 3gp is video",
+			path:     "clip.3gp",
+			types:    []string{"video"},
+			expected: true,
+		},
+		{
 			name:     "not a supported type",
 			path:     "document.pdf",
 			types:    []string{"image", "video"},

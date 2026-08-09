@@ -90,7 +90,12 @@ var runCmd = &console.Command{
 				fmt.Fprintf(c.App.Writer, "Moving %s -> %s\n", file.OldPath, file.NewPath)
 				outcome, err := fffile.MoveEntry(file.Entry, file.NewPath)
 				if err != nil {
-					return console.Exit(fmt.Sprintf("%s: failed to move: %v", file.OldPath, err), 1)
+					// A single file failing to move (e.g. a destination that exists
+					// with different content) must not abort the whole run: record it
+					// and keep going with the remaining files.
+					fmt.Fprintf(c.App.ErrWriter, "%s: failed to move: %v\n", file.OldPath, err)
+					errors++
+					continue
 				}
 				if outcome == fffile.Deduplicated {
 					fmt.Fprintf(c.App.Writer, "<fg=yellow>Duplicate: %s already exists at %s, deleted source</>\n", file.OldPath, file.NewPath)

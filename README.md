@@ -44,6 +44,7 @@ profiles:
 - `profiles` is a map of profile names -> profile config.
 - A `ProfileConfig` contains: `sources` (list), optional `patterns` (filename patterns used to extract metadata), and `target.path` (template used to build destination path).
 - `SourceConfig` has `path`, `recurse`, `types` and optional `filenames`. `path` may be a local directory or an `mtp://` device URL (see "Android phone (MTP) sources").
+- `types` names are hierarchical: a type also covers its subtypes, so `image` matches standard images *and* RAW files (`image.raw`), while `image.raw` matches RAW files only. Consequently the same path cannot use `image` in one profile and `image.raw` in another — they would both claim the same files.
 
 ### Android phone (MTP) sources — Windows only
 
