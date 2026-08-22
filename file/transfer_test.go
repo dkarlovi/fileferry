@@ -11,7 +11,7 @@ import (
 	ffcfg "github.com/dkarlovi/fileferry/config"
 )
 
-// fakeEntry is an in-memory Entry for testing MoveEntry without a device. It is
+// fakeEntry is an in-memory Entry for testing TransferEntry without a device. It is
 // intentionally NOT a localPathProvider, so it exercises the streamed path.
 type fakeEntry struct {
 	name    string
@@ -79,18 +79,18 @@ func TestProcessFileSkipsContentWhenFilenameSufficient(t *testing.T) {
 	}
 }
 
-func TestMoveEntrySuccess(t *testing.T) {
+func TestTransferEntryMoveSuccess(t *testing.T) {
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "out", "moved.dng")
 	content := []byte("raw photo bytes")
 
 	e := &fakeEntry{name: "moved.dng", bodies: [][]byte{content, content}}
-	outcome, err := MoveEntry(e, dest)
+	outcome, err := TransferEntry(e, dest, ffcfg.OperationMove)
 	if err != nil {
-		t.Fatalf("MoveEntry: %v", err)
+		t.Fatalf("TransferEntry: %v", err)
 	}
-	if outcome != Moved {
-		t.Errorf("outcome = %v; want Moved", outcome)
+	if outcome != Transferred {
+		t.Errorf("outcome = %v; want Transferred", outcome)
 	}
 
 	got, err := os.ReadFile(dest)
@@ -108,7 +108,7 @@ func TestMoveEntrySuccess(t *testing.T) {
 	}
 }
 
-func TestMoveEntryExistingDuplicateDeletesSource(t *testing.T) {
+func TestTransferEntryMoveExistingDuplicateDeletesSource(t *testing.T) {
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "out", "moved.dng")
 	content := []byte("raw photo bytes")
@@ -121,9 +121,9 @@ func TestMoveEntryExistingDuplicateDeletesSource(t *testing.T) {
 	}
 
 	e := &fakeEntry{name: "moved.dng", bodies: [][]byte{content}}
-	outcome, err := MoveEntry(e, dest)
+	outcome, err := TransferEntry(e, dest, ffcfg.OperationMove)
 	if err != nil {
-		t.Fatalf("MoveEntry: %v", err)
+		t.Fatalf("TransferEntry: %v", err)
 	}
 	if outcome != Deduplicated {
 		t.Errorf("outcome = %v; want Deduplicated", outcome)
@@ -144,7 +144,71 @@ func TestMoveEntryExistingDuplicateDeletesSource(t *testing.T) {
 	}
 }
 
-func TestMoveEntryExistingDifferentContentErrors(t *testing.T) {
+func TestTransferEntryCopyKeepsSource(t *testing.T) {
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "out", "copied.dng")
+	content := []byte("raw photo bytes")
+
+	e := &fakeEntry{name: "copied.dng", bodies: [][]byte{content, content}}
+	outcome, err := TransferEntry(e, dest, ffcfg.OperationCopy)
+	if err != nil {
+		t.Fatalf("TransferEntry: %v", err)
+	}
+	if outcome != Transferred {
+		t.Errorf("outcome = %v; want Transferred", outcome)
+	}
+
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read dest: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("dest content = %q; want %q", got, content)
+	}
+	if e.deleted {
+		t.Error("source was deleted by a copy")
+	}
+	if _, err := os.Stat(dest + ".partial"); !os.IsNotExist(err) {
+		t.Error("temp .partial file was left behind")
+	}
+}
+
+// A copy leaves the source behind, so every subsequent run re-encounters it and
+// must recognise the destination as its own earlier copy rather than deleting
+// anything or reporting a conflict.
+func TestTransferEntryCopyExistingDuplicateKeepsBoth(t *testing.T) {
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "out", "copied.dng")
+	content := []byte("raw photo bytes")
+
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(dest, content, 0644); err != nil {
+		t.Fatalf("seed dest: %v", err)
+	}
+
+	e := &fakeEntry{name: "copied.dng", bodies: [][]byte{content}}
+	outcome, err := TransferEntry(e, dest, ffcfg.OperationCopy)
+	if err != nil {
+		t.Fatalf("TransferEntry: %v", err)
+	}
+	if outcome != Deduplicated {
+		t.Errorf("outcome = %v; want Deduplicated", outcome)
+	}
+	if e.deleted {
+		t.Error("source was deleted by a copy that hit an existing duplicate")
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read dest: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("dest content = %q; want %q (existing file must be left intact)", got, content)
+	}
+}
+
+func TestTransferEntryExistingDifferentContentErrors(t *testing.T) {
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "moved.dng")
 	existing := []byte("a totally different file")
@@ -154,7 +218,7 @@ func TestMoveEntryExistingDifferentContentErrors(t *testing.T) {
 	}
 
 	e := &fakeEntry{name: "moved.dng", bodies: [][]byte{[]byte("incoming source bytes")}}
-	_, err := MoveEntry(e, dest)
+	_, err := TransferEntry(e, dest, ffcfg.OperationMove)
 	if err == nil {
 		t.Fatal("expected error when destination exists with different content, got nil")
 	}
@@ -170,19 +234,19 @@ func TestMoveEntryExistingDifferentContentErrors(t *testing.T) {
 	}
 }
 
-func TestPreviewMove(t *testing.T) {
+func TestPreviewTransfer(t *testing.T) {
 	tmpDir := t.TempDir()
 	content := []byte("raw photo bytes")
 
 	t.Run("missing destination would move", func(t *testing.T) {
 		dest := filepath.Join(tmpDir, "absent", "moved.dng")
 		e := &fakeEntry{name: "moved.dng", bodies: [][]byte{content}}
-		outcome, err := PreviewMove(e, dest)
+		outcome, err := PreviewTransfer(e, dest)
 		if err != nil {
-			t.Fatalf("PreviewMove: %v", err)
+			t.Fatalf("PreviewTransfer: %v", err)
 		}
-		if outcome != Moved {
-			t.Errorf("outcome = %v; want Moved", outcome)
+		if outcome != Transferred {
+			t.Errorf("outcome = %v; want Transferred", outcome)
 		}
 		if e.opens != 0 {
 			t.Errorf("source opened %d times; want 0 when destination is absent", e.opens)
@@ -195,15 +259,15 @@ func TestPreviewMove(t *testing.T) {
 			t.Fatalf("seed dest: %v", err)
 		}
 		e := &fakeEntry{name: "dup.dng", bodies: [][]byte{content}}
-		outcome, err := PreviewMove(e, dest)
+		outcome, err := PreviewTransfer(e, dest)
 		if err != nil {
-			t.Fatalf("PreviewMove: %v", err)
+			t.Fatalf("PreviewTransfer: %v", err)
 		}
 		if outcome != Deduplicated {
 			t.Errorf("outcome = %v; want Deduplicated", outcome)
 		}
 		if e.deleted {
-			t.Error("PreviewMove must not delete the source")
+			t.Error("PreviewTransfer must not delete the source")
 		}
 	})
 
@@ -214,12 +278,12 @@ func TestPreviewMove(t *testing.T) {
 			t.Fatalf("seed dest: %v", err)
 		}
 		e := &fakeEntry{name: "conflict.dng", bodies: [][]byte{content}}
-		_, err := PreviewMove(e, dest)
+		_, err := PreviewTransfer(e, dest)
 		if err == nil {
 			t.Fatal("expected error for differing destination, got nil")
 		}
 		if e.deleted {
-			t.Error("PreviewMove must not delete the source")
+			t.Error("PreviewTransfer must not delete the source")
 		}
 		got, _ := os.ReadFile(dest)
 		if string(got) != string(existing) {
@@ -228,13 +292,13 @@ func TestPreviewMove(t *testing.T) {
 	})
 }
 
-func TestMoveEntryHashMismatchDoesNotDelete(t *testing.T) {
+func TestTransferEntryHashMismatchDoesNotDelete(t *testing.T) {
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "moved.dng")
 
 	// First Open (copy) and second Open (verify re-read) differ → corruption.
 	e := &fakeEntry{name: "moved.dng", bodies: [][]byte{[]byte("good-copy-bytes"), []byte("DIFFERENT-bytes")}}
-	_, err := MoveEntry(e, dest)
+	_, err := TransferEntry(e, dest, ffcfg.OperationMove)
 	if err == nil {
 		t.Fatal("expected verification error, got nil")
 	}
@@ -267,15 +331,15 @@ func TestCollisionErrorIdenticalInBothModes(t *testing.T) {
 	}
 
 	previewDest, previewEntry := seed(t)
-	_, previewErr := PreviewMove(previewEntry, previewDest)
+	_, previewErr := PreviewTransfer(previewEntry, previewDest)
 	if previewErr == nil {
-		t.Fatal("PreviewMove: expected error for differing destination, got nil")
+		t.Fatal("PreviewTransfer: expected error for differing destination, got nil")
 	}
 
 	moveDest, moveEntry := seed(t)
-	_, moveErr := MoveEntry(moveEntry, moveDest)
+	_, moveErr := TransferEntry(moveEntry, moveDest, ffcfg.OperationMove)
 	if moveErr == nil {
-		t.Fatal("MoveEntry: expected error for differing destination, got nil")
+		t.Fatal("TransferEntry: expected error for differing destination, got nil")
 	}
 
 	// The paths differ per temp dir, so compare the messages with the
@@ -284,6 +348,6 @@ func TestCollisionErrorIdenticalInBothModes(t *testing.T) {
 		return strings.ReplaceAll(err.Error(), dest, "<dest>")
 	}
 	if got, want := normalize(moveErr, moveDest), normalize(previewErr, previewDest); got != want {
-		t.Errorf("MoveEntry error = %q; want the same as PreviewMove's %q", got, want)
+		t.Errorf("TransferEntry error = %q; want the same as PreviewTransfer's %q", got, want)
 	}
 }

@@ -170,6 +170,66 @@ func TestLoadConfig_EmptySourcePath(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_Operation(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	yamlOperations := `profiles:
+  Videos:
+    sources:
+      - path: /media/inbox
+        types: [video]
+      - path: /media/library
+        types: [video]
+        operation: copy
+    target:
+      path: /organized/videos
+`
+
+	if err := os.WriteFile(configPath, []byte(yamlOperations), 0644); err != nil {
+		t.Fatalf("Failed to create test config: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	srcs := cfg.Profiles["Videos"].Sources
+	if got := srcs[0].Op(); got != OperationMove {
+		t.Errorf("Op() for unset operation = %q; want %q", got, OperationMove)
+	}
+	if got := srcs[1].Op(); got != OperationCopy {
+		t.Errorf("Op() = %q; want %q", got, OperationCopy)
+	}
+}
+
+func TestLoadConfig_UnknownOperation(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	yamlBadOperation := `profiles:
+  Videos:
+    sources:
+      - path: /media/inbox
+        types: [video]
+        operation: teleport
+    target:
+      path: /organized/videos
+`
+
+	if err := os.WriteFile(configPath, []byte(yamlBadOperation), 0644); err != nil {
+		t.Fatalf("Failed to create test config: %v", err)
+	}
+
+	_, err := LoadConfig(configPath)
+	if err == nil {
+		t.Fatal("LoadConfig() expected error for unknown operation, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown operation") {
+		t.Errorf("Expected error about unknown operation, got: %v", err)
+	}
+}
+
 func TestLoadConfig_DuplicateSourcePath(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")

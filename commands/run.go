@@ -12,13 +12,13 @@ import (
 var runCmd = &console.Command{
 	Category:    "",
 	Name:        "run",
-	Usage:       "Execute moves according to config",
-	Description: "Scans sources and moves files according to the target template",
+	Usage:       "Execute transfers according to config",
+	Description: "Scans sources and moves or copies files according to the target template",
 	Args: []*console.Arg{
 		{Name: "profile", Optional: true, Description: "Profile name to run (optional, runs all profiles if not specified)"},
 	},
 	Flags: []console.Flag{
-		&console.BoolFlag{Name: "ack", Usage: "Actually move files"},
+		&console.BoolFlag{Name: "ack", Usage: "Actually move/copy files"},
 	},
 	Action: func(c *console.Context) error {
 		cfg, err := ffconfig.LoadConfigPrefer(c.String("config"))
@@ -37,6 +37,7 @@ var runCmd = &console.Command{
 
 		skipped := 0
 		moved := 0
+		copied := 0
 		deduped := 0
 		errors := 0
 
@@ -59,7 +60,7 @@ var runCmd = &console.Command{
 			for ev := range evCh {
 				switch ev.EventType {
 				case "start":
-					fmt.Fprintf(c.App.Writer, "Scanning profile=<info>%s</> <comment>%s</> (recurse=%v, types=%v)\n", ev.Profile, ev.SrcPath, ev.Recurse, ev.Types)
+					fmt.Fprintf(c.App.Writer, "Scanning profile=<info>%s</> <comment>%s</> (operation=%v, recurse=%v, types=%v)\n", ev.Profile, ev.SrcPath, ev.Operation, ev.Recurse, ev.Types)
 				case "found":
 					fmt.Fprintf(c.App.Writer, "Found <warning>%d</> files in <comment>%s</>\n", ev.Found, ev.SrcPath)
 				case "warning":
@@ -104,24 +105,36 @@ var runCmd = &console.Command{
 				continue
 			}
 
+			isCopy := file.Operation == ffconfig.OperationCopy
+
 			if c.Bool("ack") {
-				fmt.Fprintf(c.App.Writer, "Moving %s -> %s\n", file.OldPath, file.NewPath)
-				outcome, err := fffile.MoveEntry(file.Entry, file.NewPath)
+				if isCopy {
+					fmt.Fprintf(c.App.Writer, "Copying %s -> %s\n", file.OldPath, file.NewPath)
+				} else {
+					fmt.Fprintf(c.App.Writer, "Moving %s -> %s\n", file.OldPath, file.NewPath)
+				}
+				outcome, err := fffile.TransferEntry(file.Entry, file.NewPath, file.Operation)
 				if err != nil {
-					// A single file failing to move (e.g. a destination that exists
-					// with different content) must not abort the whole run: record it
-					// and keep going with the remaining files.
+					// A single file failing to transfer (e.g. a destination that
+					// exists with different content) must not abort the whole run:
+					// record it and keep going with the remaining files.
 					reportError(file.OldPath, err)
 					continue
 				}
 				if outcome == fffile.Deduplicated {
-					fmt.Fprintf(c.App.Writer, "<fg=yellow>Duplicate: %s already exists at %s, deleted source</>\n", file.OldPath, file.NewPath)
+					if isCopy {
+						fmt.Fprintf(c.App.Writer, "<fg=yellow>Duplicate: %s already exists at %s, left source in place</>\n", file.OldPath, file.NewPath)
+					} else {
+						fmt.Fprintf(c.App.Writer, "<fg=yellow>Duplicate: %s already exists at %s, deleted source</>\n", file.OldPath, file.NewPath)
+					}
 					deduped++
+				} else if isCopy {
+					copied++
 				} else {
 					moved++
 				}
 			} else {
-				outcome, err := fffile.PreviewMove(file.Entry, file.NewPath)
+				outcome, err := fffile.PreviewTransfer(file.Entry, file.NewPath)
 				if err != nil {
 					reportError(file.OldPath, err)
 					continue
@@ -129,6 +142,9 @@ var runCmd = &console.Command{
 				if outcome == fffile.Deduplicated {
 					fmt.Fprintf(c.App.Writer, "<fg=yellow>Would skip duplicate: %s already exists at %s</>\n", file.OldPath, file.NewPath)
 					deduped++
+				} else if isCopy {
+					fmt.Fprintf(c.App.Writer, "Would copy %s -> %s (use --ack to actually copy)\n", file.OldPath, file.NewPath)
+					copied++
 				} else {
 					fmt.Fprintf(c.App.Writer, "Would move %s -> %s (use --ack to actually move)\n", file.OldPath, file.NewPath)
 					moved++
@@ -142,6 +158,9 @@ var runCmd = &console.Command{
 		errors += scanErrors
 
 		summary := fmt.Sprintf("Summary: %d moved, %d duplicates, %d skipped, %d errors", moved, deduped, skipped, errors)
+		if copied > 0 {
+			summary = fmt.Sprintf("Summary: %d moved, %d copied, %d duplicates, %d skipped, %d errors", moved, copied, deduped, skipped, errors)
+		}
 		if warnings > 0 {
 			summary += fmt.Sprintf(", %d warnings", warnings)
 		}
