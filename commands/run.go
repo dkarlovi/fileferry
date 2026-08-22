@@ -72,6 +72,15 @@ var runCmd = &console.Command{
 			}
 		}()
 
+		// reportError is the single place per-file failures are rendered, so the
+		// same situation (most notably a destination that exists with different
+		// content) looks identical whether it surfaced during a dry run or a real
+		// move.
+		reportError := func(path string, err error) {
+			fmt.Fprintf(c.App.ErrWriter, "<fg=red>Error: %s: %v</>\n", path, err)
+			errors++
+		}
+
 		for file := range filesCh {
 			// when verbose, show the currently scanned file
 			if verbose {
@@ -81,13 +90,12 @@ var runCmd = &console.Command{
 			if file.Error != nil {
 				// Special handling for unpopulated tokens - treat as skip with warning
 				if unpopErr, ok := file.Error.(*fffile.UnpopulatedTokensError); ok {
-					fmt.Fprintf(c.App.Writer, "<fg=yellow>Warning: Skipping %s: %v</>\n", file.OldPath, unpopErr)
+					fmt.Fprintf(c.App.Writer, "<fg=yellow>Warning: skipping %s: %v</>\n", file.OldPath, unpopErr)
 					skipped++
 					continue
 				}
 				// All other errors go to stderr
-				fmt.Fprintf(c.App.ErrWriter, "%s: %v\n", file.OldPath, file.Error)
-				errors++
+				reportError(file.OldPath, file.Error)
 				continue
 			}
 
@@ -103,8 +111,7 @@ var runCmd = &console.Command{
 					// A single file failing to move (e.g. a destination that exists
 					// with different content) must not abort the whole run: record it
 					// and keep going with the remaining files.
-					fmt.Fprintf(c.App.ErrWriter, "<error>%s: failed to move: %v</>\n", file.OldPath, err)
-					errors++
+					reportError(file.OldPath, err)
 					continue
 				}
 				if outcome == fffile.Deduplicated {
@@ -116,8 +123,7 @@ var runCmd = &console.Command{
 			} else {
 				outcome, err := fffile.PreviewMove(file.Entry, file.NewPath)
 				if err != nil {
-					fmt.Fprintf(c.App.ErrWriter, "%s: %v\n", file.OldPath, err)
-					errors++
+					reportError(file.OldPath, err)
 					continue
 				}
 				if outcome == fffile.Deduplicated {

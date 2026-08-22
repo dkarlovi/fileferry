@@ -248,3 +248,42 @@ func TestMoveEntryHashMismatchDoesNotDelete(t *testing.T) {
 		t.Error("temp .partial file should be cleaned up after failure")
 	}
 }
+
+// TestCollisionErrorIdenticalInBothModes locks in that a destination that
+// exists with different content is reported identically by the dry run and the
+// real move: it is the same situation, so it must not read (or be presented) as
+// two different problems depending on whether --ack was passed.
+func TestCollisionErrorIdenticalInBothModes(t *testing.T) {
+	content := []byte("incoming source bytes")
+	existing := []byte("a totally different file")
+
+	seed := func(t *testing.T) (string, *fakeEntry) {
+		t.Helper()
+		dest := filepath.Join(t.TempDir(), "conflict.dng")
+		if err := os.WriteFile(dest, existing, 0644); err != nil {
+			t.Fatalf("seed dest: %v", err)
+		}
+		return dest, &fakeEntry{name: "conflict.dng", bodies: [][]byte{content}}
+	}
+
+	previewDest, previewEntry := seed(t)
+	_, previewErr := PreviewMove(previewEntry, previewDest)
+	if previewErr == nil {
+		t.Fatal("PreviewMove: expected error for differing destination, got nil")
+	}
+
+	moveDest, moveEntry := seed(t)
+	_, moveErr := MoveEntry(moveEntry, moveDest)
+	if moveErr == nil {
+		t.Fatal("MoveEntry: expected error for differing destination, got nil")
+	}
+
+	// The paths differ per temp dir, so compare the messages with the
+	// destination path factored out.
+	normalize := func(err error, dest string) string {
+		return strings.ReplaceAll(err.Error(), dest, "<dest>")
+	}
+	if got, want := normalize(moveErr, moveDest), normalize(previewErr, previewDest); got != want {
+		t.Errorf("MoveEntry error = %q; want the same as PreviewMove's %q", got, want)
+	}
+}
