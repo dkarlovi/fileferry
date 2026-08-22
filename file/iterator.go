@@ -1,12 +1,14 @@
 package file
 
 import (
+	"errors"
 	"io"
 	"path/filepath"
 	"runtime"
 	"sync"
 
 	ffcfg "github.com/dkarlovi/fileferry/config"
+	"github.com/dkarlovi/fileferry/mtp"
 )
 
 type File struct {
@@ -34,7 +36,7 @@ type ScanEvent struct {
 	Types     []string
 	Found     int    // number of files found (if >=0)
 	Error     error  // optional error that happened while scanning
-	EventType string // one of: "start", "found", "error"
+	EventType string // one of: "start", "found", "warning", "error"
 }
 
 // FileIteratorWithEvents returns a channel of Files, a channel of ScanEvent, and
@@ -61,22 +63,18 @@ func FileIteratorWithEvents(cfg *ffcfg.Config, profileName string) (<-chan File,
 		profile string
 		src     ffcfg.SourceConfig
 		source  Source
+		openErr error // set when OpenSource failed; reported once when scanning
 	}
 	var opened []openSource
-	var openErrs []File
 	for profName, prof := range cfg.Profiles {
 		if profileName != "" && profName != profileName {
 			continue
 		}
 		for _, src := range prof.Sources {
 			source, err := OpenSource(src)
-			if err != nil {
-				openErrs = append(openErrs, File{OldPath: src.Path, Error: err})
-				// Remember the failing source so its error event is emitted in order.
-				opened = append(opened, openSource{profile: profName, src: src, source: nil})
-				continue
-			}
-			opened = append(opened, openSource{profile: profName, src: src, source: source})
+			// A failing source is remembered rather than dropped, so its problem
+			// is reported in scan order alongside the sources that did open.
+			opened = append(opened, openSource{profile: profName, src: src, source: source, openErr: err})
 		}
 	}
 
@@ -116,22 +114,17 @@ func FileIteratorWithEvents(cfg *ffcfg.Config, profileName string) (<-chan File,
 			for _, o := range opened {
 				evCh <- ScanEvent{Profile: o.profile, SrcPath: o.src.Path, Recurse: o.src.Recurse, Types: o.src.Types, EventType: "start"}
 
-				if o.source == nil {
-					// OpenSource failed earlier; surface the recorded error.
-					for _, f := range openErrs {
-						if f.OldPath == o.src.Path {
-							evCh <- ScanEvent{Profile: o.profile, SrcPath: o.src.Path, EventType: "error", Error: f.Error}
-							ch <- f
-							break
-						}
-					}
+				// Source-level problems are reported through the event channel
+				// only: sending them on the file channel as well would print and
+				// count the same problem twice.
+				if o.openErr != nil {
+					evCh <- ScanEvent{Profile: o.profile, SrcPath: o.src.Path, EventType: eventTypeFor(o.openErr), Error: o.openErr}
 					continue
 				}
 
 				entries, err := o.source.Scan(o.src.Types, o.src.Recurse)
 				if err != nil {
-					evCh <- ScanEvent{Profile: o.profile, SrcPath: o.src.Path, EventType: "error", Error: err}
-					ch <- File{OldPath: o.src.Path, Error: err}
+					evCh <- ScanEvent{Profile: o.profile, SrcPath: o.src.Path, EventType: eventTypeFor(err), Error: err}
 					continue
 				}
 
@@ -146,6 +139,16 @@ func FileIteratorWithEvents(cfg *ffcfg.Config, profileName string) (<-chan File,
 	}()
 
 	return ch, evCh, closer
+}
+
+// eventTypeFor classifies a source-level failure. A device that simply isn't
+// plugged in (a phone left on the desk) is a normal state of the world, not a
+// failure of the run, so it is downgraded to a warning.
+func eventTypeFor(err error) string {
+	if errors.Is(err, mtp.ErrDeviceUnavailable) {
+		return "warning"
+	}
+	return "error"
 }
 
 type closerFunc func() error

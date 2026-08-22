@@ -1,12 +1,15 @@
 package file
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	ffcfg "github.com/dkarlovi/fileferry/config"
+	"github.com/dkarlovi/fileferry/mtp"
 )
 
 func TestTargetTemplateError_Error(t *testing.T) {
@@ -389,19 +392,18 @@ func TestFileIteratorWithEvents_ScanError(t *testing.T) {
 		eventsDone <- events
 	}()
 
-	// Collect files
-	hasErrorFile := false
-	for file := range fileCh {
-		if file.Error != nil {
-			hasErrorFile = true
-		}
+	// A source-level failure is reported through the event channel only, so no
+	// file at all is expected here - one problem, one report.
+	fileCount := 0
+	for range fileCh {
+		fileCount++
 	}
 
 	// Wait for events to be collected
 	events := <-eventsDone
 
-	if !hasErrorFile {
-		t.Error("Expected file with error, got none")
+	if fileCount != 0 {
+		t.Errorf("Expected no files for a failing source, got %d", fileCount)
 	}
 
 	// Check that we got an error event
@@ -698,5 +700,24 @@ func TestFileIteratorWithEvents_ProfileFilter(t *testing.T) {
 	}
 	if !profilesSeen["videos"] || !profilesSeen["images"] {
 		t.Errorf("Expected events from both profiles, got events from: %v", profilesSeen)
+	}
+}
+
+func TestEventTypeFor(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"disconnected device", fmt.Errorf("no MTP devices connected: %w", mtp.ErrDeviceUnavailable), "warning"},
+		{"unsupported platform", mtp.ErrUnsupported, "error"},
+		{"other failure", errors.New("permission denied"), "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := eventTypeFor(tt.err); got != tt.want {
+				t.Errorf("eventTypeFor(%v) = %q, want %q", tt.err, got, tt.want)
+			}
+		})
 	}
 }

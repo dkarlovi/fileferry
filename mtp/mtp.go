@@ -19,6 +19,23 @@ import (
 // ErrUnsupported is returned by Open on platforms without WPD support.
 var ErrUnsupported = errors.New("MTP sources are only supported on native Windows (not WSL)")
 
+// ErrDeviceUnavailable is wrapped by Open's error when the requested device is
+// simply not plugged in. A phone that isn't attached is an expected, everyday
+// state rather than a failure, so callers can report it as a warning and keep
+// processing the remaining sources.
+var ErrDeviceUnavailable = errors.New("MTP device unavailable")
+
+// unavailable tags err as an ErrDeviceUnavailable case while keeping err's own
+// message intact (errors.Is matches, but nothing is appended to the text).
+func unavailable(err error) error { return unavailableError{err} }
+
+type unavailableError struct{ err error }
+
+func (e unavailableError) Error() string { return e.err.Error() }
+func (e unavailableError) Unwrap() []error {
+	return []error{e.err, ErrDeviceUnavailable}
+}
+
 // Object is a single file on an MTP device.
 type Object interface {
 	// Name is the file's base name, e.g. "PXL_20240101_120000.dng".

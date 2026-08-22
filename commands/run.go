@@ -48,16 +48,26 @@ var runCmd = &console.Command{
 		// moves are done; entries' Open/Delete rely on them.
 		defer sources.Close()
 
-		// consume events and print colored messages (profile and path highlighted)
+		// consume events and print colored messages (profile and path highlighted).
+		// The counters below belong to this goroutine alone; they are folded into
+		// the totals only after evDone signals it has finished.
+		scanErrors := 0
+		warnings := 0
+		evDone := make(chan struct{})
 		go func() {
+			defer close(evDone)
 			for ev := range evCh {
 				switch ev.EventType {
 				case "start":
 					fmt.Fprintf(c.App.Writer, "Scanning profile=<info>%s</> <comment>%s</> (recurse=%v, types=%v)\n", ev.Profile, ev.SrcPath, ev.Recurse, ev.Types)
 				case "found":
 					fmt.Fprintf(c.App.Writer, "Found <warning>%d</> files in <comment>%s</>\n", ev.Found, ev.SrcPath)
+				case "warning":
+					fmt.Fprintf(c.App.Writer, "<fg=yellow>Warning: skipping %s: %v</>\n", ev.SrcPath, ev.Error)
+					warnings++
 				case "error":
 					fmt.Fprintf(c.App.ErrWriter, "<fg=red>Error scanning %s: %v</>\n", ev.SrcPath, ev.Error)
+					scanErrors++
 				}
 			}
 		}()
@@ -120,7 +130,16 @@ var runCmd = &console.Command{
 			}
 		}
 
-		fmt.Fprintf(c.App.Writer, "Summary: %d moved, %d duplicates, %d skipped, %d errors.\n", moved, deduped, skipped, errors)
+		// Wait for the event printer so its output lands before the summary and
+		// its counters are safe to read.
+		<-evDone
+		errors += scanErrors
+
+		summary := fmt.Sprintf("Summary: %d moved, %d duplicates, %d skipped, %d errors", moved, deduped, skipped, errors)
+		if warnings > 0 {
+			summary += fmt.Sprintf(", %d warnings", warnings)
+		}
+		fmt.Fprintf(c.App.Writer, "%s.\n", summary)
 		return nil
 	},
 }
