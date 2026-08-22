@@ -16,10 +16,13 @@ type File struct {
 	NewPath string
 	// Operation is what the owning source asked for (move or copy).
 	Operation ffcfg.Operation
-	ShouldOp  bool
-	Metadata  *FileMetadata
-	Entry     Entry
-	Error     error
+	// OnConflict is the owning profile's policy for a target path already taken
+	// by different content.
+	OnConflict ffcfg.OnConflict
+	ShouldOp   bool
+	Metadata   *FileMetadata
+	Entry      Entry
+	Error      error
 }
 
 // FileIterator is a convenience wrapper returning only the file channel. It is
@@ -166,9 +169,10 @@ type fileJob struct {
 
 func processFile(entry Entry, src ffcfg.SourceConfig, profileName string, cfg *ffcfg.Config) File {
 	file := File{
-		OldPath:   entry.DisplayPath(),
-		Operation: src.Op(),
-		Entry:     entry,
+		OldPath:    entry.DisplayPath(),
+		Operation:  src.Op(),
+		OnConflict: cfg.Profiles[profileName].Conflict(),
+		Entry:      entry,
 	}
 
 	var meta *FileMetadata

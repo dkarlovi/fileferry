@@ -38,14 +38,51 @@ func (s SourceConfig) Op() Operation {
 	return s.Operation
 }
 
+// OnConflict is what a profile does when a file's target path is already taken
+// by a file with *different* content (identical content is always deduplicated,
+// never a conflict).
+type OnConflict string
+
+const (
+	// OnConflictError leaves both files untouched and reports the collision.
+	// This is the default: two different photos wanting the same name is
+	// normally a question only a human can answer.
+	OnConflictError OnConflict = "error"
+	// OnConflictKeepLargest gives the target path to whichever rendition has the
+	// most pixels — the original — and parks the smaller one (a crop, a
+	// downscaled export) alongside it under an "-alt" name. Renditions whose
+	// dimensions are unknown or equal fall back to OnConflictError.
+	OnConflictKeepLargest OnConflict = "keep-largest"
+)
+
 type TargetPathConfig struct {
 	Path string `yaml:"path"`
 }
 
 type ProfileConfig struct {
-	Sources  []SourceConfig   `yaml:"sources"`
-	Patterns []string         `yaml:"patterns,omitempty"`
-	Target   TargetPathConfig `yaml:"target"`
+	Sources    []SourceConfig   `yaml:"sources"`
+	Patterns   []string         `yaml:"patterns,omitempty"`
+	Target     TargetPathConfig `yaml:"target"`
+	OnConflict OnConflict       `yaml:"on_conflict,omitempty"`
+}
+
+// Conflict returns the profile's conflict policy, defaulting to error when
+// unset.
+func (p ProfileConfig) Conflict() OnConflict {
+	if p.OnConflict == "" {
+		return OnConflictError
+	}
+	return p.OnConflict
+}
+
+// ParseOnConflict validates a conflict policy name, as given on the command
+// line or in the config file.
+func ParseOnConflict(name string) (OnConflict, error) {
+	switch OnConflict(name) {
+	case OnConflictError, OnConflictKeepLargest:
+		return OnConflict(name), nil
+	}
+	return "", fmt.Errorf("unknown conflict policy %q (want %q or %q)", name, OnConflictError, OnConflictKeepLargest)
 }
 
 type Config struct {
@@ -75,6 +112,11 @@ func LoadConfig(path string) (*Config, error) {
 	for profName, prof := range cfg.Profiles {
 		if prof.Target.Path == "" {
 			return nil, fmt.Errorf("profile %q: missing target.path", profName)
+		}
+		if prof.OnConflict != "" {
+			if _, err := ParseOnConflict(string(prof.OnConflict)); err != nil {
+				return nil, fmt.Errorf("profile %q: %w", profName, err)
+			}
 		}
 		for _, src := range prof.Sources {
 			if src.Path == "" {

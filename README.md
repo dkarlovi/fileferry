@@ -6,6 +6,7 @@ FileFerry is a small CLI that organizes image and video files into target folder
 - Scan one or more source directories (profiles) for media files.
 - Extract metadata from filenames, EXIF (images) or ffprobe (videos) when available.
 - Render a per-profile target path template and move (or copy) files (dry-run by default).
+- Tidy up the organized tree afterwards, keeping it in line with the current config (`tidy:dupes`).
 
 ### Quick examples
 Build and dry-run with your config file:
@@ -59,7 +60,31 @@ profiles:
 ```
 
   Either way the destination is verified by SHA-256 before anything is finalized, and a destination that already holds an identical file is reported as a duplicate (with a move, the redundant source is deleted; with a copy, nothing happens) — so re-running a `copy` profile is safe and idempotent. A destination that exists with *different* content is always an error that leaves both files untouched.
+- `on_conflict` is either `error` (the default) or `keep-largest`; see "Conflicting renditions" below.
 - `types` names are hierarchical: a type also covers its subtypes, so `image` matches standard images *and* RAW files (`image.raw`), while `image.raw` matches RAW files only. Consequently the same path cannot use `image` in one profile and `image.raw` in another — they would both claim the same files.
+
+### Conflicting renditions (`on_conflict`)
+
+Two *different* files can want the same target name — most often a camera original and an edit of the same shot (a Picasa or Lightroom crop keeps the original's `DateTimeOriginal`, `Make` and `Model`, so the template resolves both to the same path). By default that is an error and both files are left untouched, because picking a winner is usually a human decision.
+
+Set `on_conflict: keep-largest` on a profile when the answer is always "the original wins":
+
+```yaml
+profiles:
+  Pictures:
+    on_conflict: keep-largest   # default: error
+    sources:
+      - path: /path/to/pictures
+        types: [image]
+    target:
+      path: /organized/{meta.taken.year}/{meta.taken.date}/{meta.taken.datetime}.{file.extension}
+```
+
+The rendition with more pixels keeps the target path; the smaller one (the crop, the downscaled export) is parked beside it as `<name>-alt.<ext>`, then `-alt2`, `-alt3`. It works in both directions — an incoming crop is filed under the alt name and the original at the target path is never touched — so a smaller rendition can never displace a bigger one regardless of import order.
+
+Two deliberate limits: if either side's dimensions cannot be read (RAW, HEIC — Go decodes JPEG/PNG/GIF headers only) or the two have the same pixel count, the policy declines to guess and falls back to the error, leaving both files alone. And re-importing a crop that is already parked is recognised as a duplicate rather than filed again, so repeated runs don't accumulate `-alt2`, `-alt3`.
+
+`run --on-conflict=error|keep-largest` overrides every profile for a single run.
 
 ### Android phone (MTP) sources — Windows only
 
@@ -126,6 +151,27 @@ profiles:
       path: /organized/{meta.taken.year}/{meta.taken.date}/{meta.taken.datetime}.{file.extension}
 ```
 This pattern matches filenames like `Still 2026-01-23 222212_1.1.1.jpg` where the time `222212` represents `22:22:12`.
+
+### Maintenance: `tidy`
+
+`run` fills the target tree; the `tidy:*` commands keep it in line with the config as it exists *today*. Every one of them is dry-run by default and only acts with `--ack`.
+
+#### `tidy:dupes` (alias `dupes`)
+
+Finds byte-identical files sitting side by side in a profile's target tree and removes the redundant copies:
+
+```bash
+./fileferry dupes            # dry-run: shows what would be deleted, in every profile
+./fileferry dupes Videos     # only the Videos profile
+./fileferry dupes --ack      # actually delete
+```
+
+How it decides:
+
+- **Where it looks.** The fixed directory prefix of the profile's `target.path` — everything before the first `{token}` — is the tree the profile owns; it is walked recursively for the file types the profile's sources claim.
+- **What counts as a duplicate.** Files are grouped by directory and size first, and only same-size *siblings* are hashed, so a large library costs a walk rather than a full checksum pass. Siblings are enough: the target path is derived from the file's own content, so copies that belong together always land in the same folder. Equal size only makes two files candidates — SHA-256 decides.
+- **Which copy survives.** The one already sitting where the current config says that content belongs, so the result is exactly what a fresh `run` of this config would have produced. The canonical path is resolved from the file's *content* (EXIF/ffprobe), which is authoritative because the copies are identical; filename patterns are consulted only when the content says nothing, and then only if the names that parse agree — two well-formed but different names cannot both be right, so neither is trusted.
+- **When nothing is canonical.** If no copy is at its target path (usually because the template changed since they were written), one is kept by name order, the redundant ones are still removed, and the set is reported as still needing a rename.
 
 ### Build & lint
 

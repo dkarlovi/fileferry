@@ -19,6 +19,7 @@ var runCmd = &console.Command{
 	},
 	Flags: []console.Flag{
 		&console.BoolFlag{Name: "ack", Usage: "Actually move/copy files"},
+		&console.StringFlag{Name: "on-conflict", Usage: `Override every profile's conflict policy for this run: <info>error</> (leave both files untouched) or <info>keep-largest</> (the larger rendition keeps the target path, the smaller is set aside under an "-alt" name)`},
 	},
 	Action: func(c *console.Context) error {
 		cfg, err := ffconfig.LoadConfigPrefer(c.String("config"))
@@ -35,10 +36,22 @@ var runCmd = &console.Command{
 			}
 		}
 
+		// An explicit --on-conflict overrides whatever the profiles configured, for
+		// this run only.
+		policyOverride := ffconfig.OnConflict("")
+		if name := c.String("on-conflict"); name != "" {
+			parsed, err := ffconfig.ParseOnConflict(name)
+			if err != nil {
+				return console.Exit(err.Error(), 1)
+			}
+			policyOverride = parsed
+		}
+
 		skipped := 0
 		moved := 0
 		copied := 0
 		deduped := 0
+		setAside := 0
 		errors := 0
 
 		// detect verbose mode (-v)
@@ -107,13 +120,31 @@ var runCmd = &console.Command{
 
 			isCopy := file.Operation == ffconfig.OperationCopy
 
+			policy := file.OnConflict
+			if policyOverride != "" {
+				policy = policyOverride
+			}
+
+			// reportSetAside renders a resolved collision identically for a dry run
+			// and a real one; only the tense differs.
+			reportSetAside := func(res fffile.TransferResult, planned bool) {
+				verb := map[bool]string{true: "would set aside", false: "set aside"}[planned]
+				switch res.Outcome {
+				case fffile.SourceSetAside:
+					fmt.Fprintf(c.App.Writer, "<fg=yellow>Conflict: %s (%s); %s as %s</>\n", file.NewPath, res.Detail, verb, res.AltPath)
+				case fffile.DestSetAside:
+					fmt.Fprintf(c.App.Writer, "<fg=yellow>Conflict: %s (%s); %s the existing file as %s</>\n", file.NewPath, res.Detail, verb, res.AltPath)
+				}
+				setAside++
+			}
+
 			if c.Bool("ack") {
 				if isCopy {
 					fmt.Fprintf(c.App.Writer, "Copying %s -> %s\n", file.OldPath, file.NewPath)
 				} else {
 					fmt.Fprintf(c.App.Writer, "Moving %s -> %s\n", file.OldPath, file.NewPath)
 				}
-				outcome, err := fffile.TransferEntry(file.Entry, file.NewPath, file.Operation)
+				res, err := fffile.TransferEntry(file.Entry, file.NewPath, file.Operation, policy)
 				if err != nil {
 					// A single file failing to transfer (e.g. a destination that
 					// exists with different content) must not abort the whole run:
@@ -121,33 +152,61 @@ var runCmd = &console.Command{
 					reportError(file.OldPath, err)
 					continue
 				}
-				if outcome == fffile.Deduplicated {
+				switch res.Outcome {
+				case fffile.Deduplicated:
+					where := file.NewPath
+					if res.AltPath != "" {
+						where = res.AltPath
+					}
 					if isCopy {
-						fmt.Fprintf(c.App.Writer, "<fg=yellow>Duplicate: %s already exists at %s, left source in place</>\n", file.OldPath, file.NewPath)
+						fmt.Fprintf(c.App.Writer, "<fg=yellow>Duplicate: %s already exists at %s, left source in place</>\n", file.OldPath, where)
 					} else {
-						fmt.Fprintf(c.App.Writer, "<fg=yellow>Duplicate: %s already exists at %s, deleted source</>\n", file.OldPath, file.NewPath)
+						fmt.Fprintf(c.App.Writer, "<fg=yellow>Duplicate: %s already exists at %s, deleted source</>\n", file.OldPath, where)
 					}
 					deduped++
-				} else if isCopy {
-					copied++
-				} else {
-					moved++
+				case fffile.SourceSetAside, fffile.DestSetAside:
+					reportSetAside(res, false)
+					if isCopy {
+						copied++
+					} else {
+						moved++
+					}
+				default:
+					if isCopy {
+						copied++
+					} else {
+						moved++
+					}
 				}
 			} else {
-				outcome, err := fffile.PreviewTransfer(file.Entry, file.NewPath)
+				res, err := fffile.PreviewTransfer(file.Entry, file.NewPath, policy)
 				if err != nil {
 					reportError(file.OldPath, err)
 					continue
 				}
-				if outcome == fffile.Deduplicated {
-					fmt.Fprintf(c.App.Writer, "<fg=yellow>Would skip duplicate: %s already exists at %s</>\n", file.OldPath, file.NewPath)
+				switch res.Outcome {
+				case fffile.Deduplicated:
+					where := file.NewPath
+					if res.AltPath != "" {
+						where = res.AltPath
+					}
+					fmt.Fprintf(c.App.Writer, "<fg=yellow>Would skip duplicate: %s already exists at %s</>\n", file.OldPath, where)
 					deduped++
-				} else if isCopy {
-					fmt.Fprintf(c.App.Writer, "Would copy %s -> %s (use --ack to actually copy)\n", file.OldPath, file.NewPath)
-					copied++
-				} else {
-					fmt.Fprintf(c.App.Writer, "Would move %s -> %s (use --ack to actually move)\n", file.OldPath, file.NewPath)
-					moved++
+				case fffile.SourceSetAside, fffile.DestSetAside:
+					reportSetAside(res, true)
+					fallthrough
+				default:
+					target := file.NewPath
+					if res.Outcome == fffile.SourceSetAside {
+						target = res.AltPath
+					}
+					if isCopy {
+						fmt.Fprintf(c.App.Writer, "Would copy %s -> %s (use --ack to actually copy)\n", file.OldPath, target)
+						copied++
+					} else {
+						fmt.Fprintf(c.App.Writer, "Would move %s -> %s (use --ack to actually move)\n", file.OldPath, target)
+						moved++
+					}
 				}
 			}
 		}
@@ -161,6 +220,9 @@ var runCmd = &console.Command{
 		if copied > 0 {
 			summary = fmt.Sprintf("Summary: %d moved, %d copied, %d duplicates, %d skipped, %d errors", moved, copied, deduped, skipped, errors)
 		}
+		if setAside > 0 {
+			summary += fmt.Sprintf(", %d conflicts resolved by setting a rendition aside", setAside)
+		}
 		if warnings > 0 {
 			summary += fmt.Sprintf(", %d warnings", warnings)
 		}
@@ -170,5 +232,5 @@ var runCmd = &console.Command{
 }
 
 func Commands() []*console.Command {
-	return []*console.Command{runCmd}
+	return []*console.Command{runCmd, dupesCmd}
 }
