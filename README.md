@@ -6,6 +6,7 @@ FileFerry is a small CLI that organizes image and video files into target folder
 - Scan one or more source directories (profiles) for media files.
 - Extract metadata from filenames, EXIF (images) or ffprobe (videos) when available.
 - Render a per-profile target path template and move (or copy) files (dry-run by default).
+- Tidy up the organized tree afterwards, keeping it in line with the current config (`tidy:dupes`).
 
 ### Quick examples
 Build and dry-run with your config file:
@@ -126,6 +127,27 @@ profiles:
       path: /organized/{meta.taken.year}/{meta.taken.date}/{meta.taken.datetime}.{file.extension}
 ```
 This pattern matches filenames like `Still 2026-01-23 222212_1.1.1.jpg` where the time `222212` represents `22:22:12`.
+
+### Maintenance: `tidy`
+
+`run` fills the target tree; the `tidy:*` commands keep it in line with the config as it exists *today*. Every one of them is dry-run by default and only acts with `--ack`.
+
+#### `tidy:dupes` (alias `dupes`)
+
+Finds byte-identical files sitting side by side in a profile's target tree and removes the redundant copies:
+
+```bash
+./fileferry dupes            # dry-run: shows what would be deleted, in every profile
+./fileferry dupes Videos     # only the Videos profile
+./fileferry dupes --ack      # actually delete
+```
+
+How it decides:
+
+- **Where it looks.** The fixed directory prefix of the profile's `target.path` — everything before the first `{token}` — is the tree the profile owns; it is walked recursively for the file types the profile's sources claim.
+- **What counts as a duplicate.** Files are grouped by directory and size first, and only same-size *siblings* are hashed, so a large library costs a walk rather than a full checksum pass. Siblings are enough: the target path is derived from the file's own content, so copies that belong together always land in the same folder. Equal size only makes two files candidates — SHA-256 decides.
+- **Which copy survives.** The one already sitting where the current config says that content belongs, so the result is exactly what a fresh `run` of this config would have produced. The canonical path is resolved from the file's *content* (EXIF/ffprobe), which is authoritative because the copies are identical; filename patterns are consulted only when the content says nothing, and then only if the names that parse agree — two well-formed but different names cannot both be right, so neither is trusted.
+- **When nothing is canonical.** If no copy is at its target path (usually because the template changed since they were written), one is kept by name order, the redundant ones are still removed, and the set is reported as still needing a rename.
 
 ### Build & lint
 

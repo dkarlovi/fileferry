@@ -170,5 +170,5 @@ var runCmd = &console.Command{
 }
 
 func Commands() []*console.Command {
-	return []*console.Command{runCmd}
+	return []*console.Command{runCmd, dupesCmd}
 }
