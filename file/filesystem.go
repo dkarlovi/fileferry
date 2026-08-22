@@ -72,6 +72,7 @@ var DefaultFileTypes = &FileTypeRegistry{
 		"image": {
 			// Standard image formats
 			".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp",
+			".heic", ".heif", // Apple/HEIF still images
 		},
 		"image.raw": {
 			// RAW image formats
@@ -89,6 +90,7 @@ var DefaultFileTypes = &FileTypeRegistry{
 		},
 		"video": {
 			".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv",
+			".3gp", // legacy 3GPP mobile video
 		},
 	},
 }
@@ -97,11 +99,22 @@ func isFileType(path string, types []string) bool {
 	return DefaultFileTypes.IsFileType(path, types)
 }
 
-// IsFileType checks if a file matches any of the specified types using this registry
+// IsFileType checks if a file matches any of the specified types using this
+// registry.
+//
+// Category names are hierarchical, dot-separated: a requested type also matches
+// every category nested below it, so "image" is a superset covering "image.raw"
+// (and any future "image.*"), while "image.raw" still matches only RAW files.
 func (r *FileTypeRegistry) IsFileType(path string, types []string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
+	if ext == "" {
+		return false
+	}
 	for _, t := range types {
-		if extensions, exists := r.Categories[t]; exists {
+		for category, extensions := range r.Categories {
+			if !categoryMatches(category, t) {
+				continue
+			}
 			for _, e := range extensions {
 				if ext == e {
 					return true
@@ -110,4 +123,10 @@ func (r *FileTypeRegistry) IsFileType(path string, types []string) bool {
 		}
 	}
 	return false
+}
+
+// categoryMatches reports whether a registry category satisfies a requested
+// type: either exactly, or as a subtype of it ("image.raw" under "image").
+func categoryMatches(category, requested string) bool {
+	return category == requested || strings.HasPrefix(category, requested+".")
 }

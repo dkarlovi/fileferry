@@ -48,19 +48,38 @@ var runCmd = &console.Command{
 		// moves are done; entries' Open/Delete rely on them.
 		defer sources.Close()
 
-		// consume events and print colored messages (profile and path highlighted)
+		// consume events and print colored messages (profile and path highlighted).
+		// The counters below belong to this goroutine alone; they are folded into
+		// the totals only after evDone signals it has finished.
+		scanErrors := 0
+		warnings := 0
+		evDone := make(chan struct{})
 		go func() {
+			defer close(evDone)
 			for ev := range evCh {
 				switch ev.EventType {
 				case "start":
 					fmt.Fprintf(c.App.Writer, "Scanning profile=<info>%s</> <comment>%s</> (recurse=%v, types=%v)\n", ev.Profile, ev.SrcPath, ev.Recurse, ev.Types)
 				case "found":
 					fmt.Fprintf(c.App.Writer, "Found <warning>%d</> files in <comment>%s</>\n", ev.Found, ev.SrcPath)
+				case "warning":
+					fmt.Fprintf(c.App.Writer, "<fg=yellow>Warning: skipping %s: %v</>\n", ev.SrcPath, ev.Error)
+					warnings++
 				case "error":
 					fmt.Fprintf(c.App.ErrWriter, "<fg=red>Error scanning %s: %v</>\n", ev.SrcPath, ev.Error)
+					scanErrors++
 				}
 			}
 		}()
+
+		// reportError is the single place per-file failures are rendered, so the
+		// same situation (most notably a destination that exists with different
+		// content) looks identical whether it surfaced during a dry run or a real
+		// move.
+		reportError := func(path string, err error) {
+			fmt.Fprintf(c.App.ErrWriter, "<fg=red>Error: %s: %v</>\n", path, err)
+			errors++
+		}
 
 		for file := range filesCh {
 			// when verbose, show the currently scanned file
@@ -71,13 +90,12 @@ var runCmd = &console.Command{
 			if file.Error != nil {
 				// Special handling for unpopulated tokens - treat as skip with warning
 				if unpopErr, ok := file.Error.(*fffile.UnpopulatedTokensError); ok {
-					fmt.Fprintf(c.App.Writer, "<fg=yellow>Warning: Skipping %s: %v</>\n", file.OldPath, unpopErr)
+					fmt.Fprintf(c.App.Writer, "<fg=yellow>Warning: skipping %s: %v</>\n", file.OldPath, unpopErr)
 					skipped++
 					continue
 				}
 				// All other errors go to stderr
-				fmt.Fprintf(c.App.ErrWriter, "%s: %v\n", file.OldPath, file.Error)
-				errors++
+				reportError(file.OldPath, file.Error)
 				continue
 			}
 
@@ -90,7 +108,11 @@ var runCmd = &console.Command{
 				fmt.Fprintf(c.App.Writer, "Moving %s -> %s\n", file.OldPath, file.NewPath)
 				outcome, err := fffile.MoveEntry(file.Entry, file.NewPath)
 				if err != nil {
-					return console.Exit(fmt.Sprintf("%s: failed to move: %v", file.OldPath, err), 1)
+					// A single file failing to move (e.g. a destination that exists
+					// with different content) must not abort the whole run: record it
+					// and keep going with the remaining files.
+					reportError(file.OldPath, err)
+					continue
 				}
 				if outcome == fffile.Deduplicated {
 					fmt.Fprintf(c.App.Writer, "<fg=yellow>Duplicate: %s already exists at %s, deleted source</>\n", file.OldPath, file.NewPath)
@@ -101,8 +123,7 @@ var runCmd = &console.Command{
 			} else {
 				outcome, err := fffile.PreviewMove(file.Entry, file.NewPath)
 				if err != nil {
-					fmt.Fprintf(c.App.ErrWriter, "%s: %v\n", file.OldPath, err)
-					errors++
+					reportError(file.OldPath, err)
 					continue
 				}
 				if outcome == fffile.Deduplicated {
@@ -115,7 +136,16 @@ var runCmd = &console.Command{
 			}
 		}
 
-		fmt.Fprintf(c.App.Writer, "Summary: %d moved, %d duplicates, %d skipped, %d errors.\n", moved, deduped, skipped, errors)
+		// Wait for the event printer so its output lands before the summary and
+		// its counters are safe to read.
+		<-evDone
+		errors += scanErrors
+
+		summary := fmt.Sprintf("Summary: %d moved, %d duplicates, %d skipped, %d errors", moved, deduped, skipped, errors)
+		if warnings > 0 {
+			summary += fmt.Sprintf(", %d warnings", warnings)
+		}
+		fmt.Fprintf(c.App.Writer, "%s.\n", summary)
 		return nil
 	},
 }

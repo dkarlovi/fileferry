@@ -206,6 +206,40 @@ func TestLoadConfig_DuplicateSourcePath(t *testing.T) {
 	}
 }
 
+// A broader type in one profile overlaps a subtype in another: "image" also
+// claims "image.raw" files, so both profiles would move the same RAW file.
+func TestLoadConfig_OverlappingTypeHierarchy(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	yaml := `profiles:
+  Pictures:
+    sources:
+      - path: /shared/path
+        types: [image]
+    target:
+      path: /organized/pictures
+  RawPictures:
+    sources:
+      - path: /shared/path
+        types: [image.raw]
+    target:
+      path: /organized/raw
+`
+
+	if err := os.WriteFile(configPath, []byte(yaml), 0644); err != nil {
+		t.Fatalf("Failed to create test config: %v", err)
+	}
+
+	_, err := LoadConfig(configPath)
+	if err == nil {
+		t.Fatal("LoadConfig() expected error for image/image.raw overlap, got nil")
+	}
+	if !strings.Contains(err.Error(), "source path") || !strings.Contains(err.Error(), "defined in profile") {
+		t.Errorf("Expected error about duplicate source path, got: %v", err)
+	}
+}
+
 // Same path with disjoint types across profiles is allowed: e.g. pulling RAW
 // images and videos off one phone folder into different profiles.
 func TestLoadConfig_SamePathDisjointTypes(t *testing.T) {

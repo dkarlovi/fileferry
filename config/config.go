@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/dkarlovi/fileferry/mtp"
 	"gopkg.in/yaml.v3"
@@ -44,7 +45,12 @@ func LoadConfig(path string) (*Config, error) {
 	// Guard against the same file being processed twice: a (path, type) pair must
 	// not appear in more than one profile. The same path with disjoint types
 	// (e.g. RAW images in one profile, videos in another) is allowed.
-	seenSources := make(map[string]string)
+	type seenSource struct {
+		path    string
+		ty      string
+		profile string
+	}
+	var seenSources []seenSource
 	for profName, prof := range cfg.Profiles {
 		if prof.Target.Path == "" {
 			return nil, fmt.Errorf("profile %q: missing target.path", profName)
@@ -66,16 +72,28 @@ func LoadConfig(path string) (*Config, error) {
 				types = []string{""}
 			}
 			for _, ty := range types {
-				key := src.Path + "\x00" + ty
-				if prev, ok := seenSources[key]; ok {
-					return nil, fmt.Errorf("source path %q with type %q defined in profile %q and %q", src.Path, ty, prev, profName)
+				for _, prev := range seenSources {
+					if prev.path == src.Path && typesOverlap(prev.ty, ty) {
+						return nil, fmt.Errorf("source path %q with type %q defined in profile %q and %q", src.Path, ty, prev.profile, profName)
+					}
 				}
-				seenSources[key] = profName
+				seenSources = append(seenSources, seenSource{path: src.Path, ty: ty, profile: profName})
 			}
 		}
 	}
 
 	return &cfg, nil
+}
+
+// typesOverlap reports whether two source types can claim the same file. Type
+// names are hierarchical and dot-separated, so a broader type covers its
+// subtypes ("image" also claims "image.raw" files); the empty type means "no
+// filter", which claims everything.
+func typesOverlap(a, b string) bool {
+	if a == "" || b == "" {
+		return true
+	}
+	return a == b || strings.HasPrefix(a, b+".") || strings.HasPrefix(b, a+".")
 }
 
 // LoadConfigPrefer tries to load a config file using the following order:

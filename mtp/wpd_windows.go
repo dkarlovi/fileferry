@@ -259,7 +259,7 @@ func findDevice(mgr uintptr, want string) (string, error) {
 		return "", fmt.Errorf("enumerate devices: %w", ole.NewError(r))
 	}
 	if count == 0 {
-		return "", fmt.Errorf("no MTP devices connected (looking for %q)", want)
+		return "", unavailable(fmt.Errorf("no MTP devices connected (looking for %q)", want))
 	}
 	ids := make([]*uint16, count)
 	if r := call(mgr, 3, uintptr(unsafe.Pointer(&ids[0])), uintptr(unsafe.Pointer(&count))); failed(r) {
@@ -278,7 +278,7 @@ func findDevice(mgr uintptr, want string) (string, error) {
 		}
 	}
 	if match == "" {
-		return "", fmt.Errorf("MTP device %q not found; connected devices: %s", want, strings.Join(names, ", "))
+		return "", unavailable(fmt.Errorf("MTP device %q not found; connected devices: %s", want, strings.Join(names, ", ")))
 	}
 	return match, nil
 }
