@@ -1,6 +1,9 @@
 package file
 
 import (
+	"bytes"
+	"image"
+	"image/jpeg"
 	"io"
 	"os"
 	"path/filepath"
@@ -85,12 +88,12 @@ func TestTransferEntryMoveSuccess(t *testing.T) {
 	content := []byte("raw photo bytes")
 
 	e := &fakeEntry{name: "moved.dng", bodies: [][]byte{content, content}}
-	outcome, err := TransferEntry(e, dest, ffcfg.OperationMove)
+	res, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictError)
 	if err != nil {
 		t.Fatalf("TransferEntry: %v", err)
 	}
-	if outcome != Transferred {
-		t.Errorf("outcome = %v; want Transferred", outcome)
+	if res.Outcome != Transferred {
+		t.Errorf("Outcome = %v; want Transferred", res.Outcome)
 	}
 
 	got, err := os.ReadFile(dest)
@@ -121,12 +124,12 @@ func TestTransferEntryMoveExistingDuplicateDeletesSource(t *testing.T) {
 	}
 
 	e := &fakeEntry{name: "moved.dng", bodies: [][]byte{content}}
-	outcome, err := TransferEntry(e, dest, ffcfg.OperationMove)
+	res, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictError)
 	if err != nil {
 		t.Fatalf("TransferEntry: %v", err)
 	}
-	if outcome != Deduplicated {
-		t.Errorf("outcome = %v; want Deduplicated", outcome)
+	if res.Outcome != Deduplicated {
+		t.Errorf("Outcome = %v; want Deduplicated", res.Outcome)
 	}
 
 	if !e.deleted {
@@ -150,12 +153,12 @@ func TestTransferEntryCopyKeepsSource(t *testing.T) {
 	content := []byte("raw photo bytes")
 
 	e := &fakeEntry{name: "copied.dng", bodies: [][]byte{content, content}}
-	outcome, err := TransferEntry(e, dest, ffcfg.OperationCopy)
+	res, err := TransferEntry(e, dest, ffcfg.OperationCopy, ffcfg.OnConflictError)
 	if err != nil {
 		t.Fatalf("TransferEntry: %v", err)
 	}
-	if outcome != Transferred {
-		t.Errorf("outcome = %v; want Transferred", outcome)
+	if res.Outcome != Transferred {
+		t.Errorf("Outcome = %v; want Transferred", res.Outcome)
 	}
 
 	got, err := os.ReadFile(dest)
@@ -189,12 +192,12 @@ func TestTransferEntryCopyExistingDuplicateKeepsBoth(t *testing.T) {
 	}
 
 	e := &fakeEntry{name: "copied.dng", bodies: [][]byte{content}}
-	outcome, err := TransferEntry(e, dest, ffcfg.OperationCopy)
+	res, err := TransferEntry(e, dest, ffcfg.OperationCopy, ffcfg.OnConflictError)
 	if err != nil {
 		t.Fatalf("TransferEntry: %v", err)
 	}
-	if outcome != Deduplicated {
-		t.Errorf("outcome = %v; want Deduplicated", outcome)
+	if res.Outcome != Deduplicated {
+		t.Errorf("Outcome = %v; want Deduplicated", res.Outcome)
 	}
 	if e.deleted {
 		t.Error("source was deleted by a copy that hit an existing duplicate")
@@ -218,7 +221,7 @@ func TestTransferEntryExistingDifferentContentErrors(t *testing.T) {
 	}
 
 	e := &fakeEntry{name: "moved.dng", bodies: [][]byte{[]byte("incoming source bytes")}}
-	_, err := TransferEntry(e, dest, ffcfg.OperationMove)
+	_, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictError)
 	if err == nil {
 		t.Fatal("expected error when destination exists with different content, got nil")
 	}
@@ -241,12 +244,12 @@ func TestPreviewTransfer(t *testing.T) {
 	t.Run("missing destination would move", func(t *testing.T) {
 		dest := filepath.Join(tmpDir, "absent", "moved.dng")
 		e := &fakeEntry{name: "moved.dng", bodies: [][]byte{content}}
-		outcome, err := PreviewTransfer(e, dest)
+		res, err := PreviewTransfer(e, dest, ffcfg.OnConflictError)
 		if err != nil {
 			t.Fatalf("PreviewTransfer: %v", err)
 		}
-		if outcome != Transferred {
-			t.Errorf("outcome = %v; want Transferred", outcome)
+		if res.Outcome != Transferred {
+			t.Errorf("Outcome = %v; want Transferred", res.Outcome)
 		}
 		if e.opens != 0 {
 			t.Errorf("source opened %d times; want 0 when destination is absent", e.opens)
@@ -259,12 +262,12 @@ func TestPreviewTransfer(t *testing.T) {
 			t.Fatalf("seed dest: %v", err)
 		}
 		e := &fakeEntry{name: "dup.dng", bodies: [][]byte{content}}
-		outcome, err := PreviewTransfer(e, dest)
+		res, err := PreviewTransfer(e, dest, ffcfg.OnConflictError)
 		if err != nil {
 			t.Fatalf("PreviewTransfer: %v", err)
 		}
-		if outcome != Deduplicated {
-			t.Errorf("outcome = %v; want Deduplicated", outcome)
+		if res.Outcome != Deduplicated {
+			t.Errorf("Outcome = %v; want Deduplicated", res.Outcome)
 		}
 		if e.deleted {
 			t.Error("PreviewTransfer must not delete the source")
@@ -278,7 +281,7 @@ func TestPreviewTransfer(t *testing.T) {
 			t.Fatalf("seed dest: %v", err)
 		}
 		e := &fakeEntry{name: "conflict.dng", bodies: [][]byte{content}}
-		_, err := PreviewTransfer(e, dest)
+		_, err := PreviewTransfer(e, dest, ffcfg.OnConflictError)
 		if err == nil {
 			t.Fatal("expected error for differing destination, got nil")
 		}
@@ -298,7 +301,7 @@ func TestTransferEntryHashMismatchDoesNotDelete(t *testing.T) {
 
 	// First Open (copy) and second Open (verify re-read) differ → corruption.
 	e := &fakeEntry{name: "moved.dng", bodies: [][]byte{[]byte("good-copy-bytes"), []byte("DIFFERENT-bytes")}}
-	_, err := TransferEntry(e, dest, ffcfg.OperationMove)
+	_, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictError)
 	if err == nil {
 		t.Fatal("expected verification error, got nil")
 	}
@@ -331,13 +334,13 @@ func TestCollisionErrorIdenticalInBothModes(t *testing.T) {
 	}
 
 	previewDest, previewEntry := seed(t)
-	_, previewErr := PreviewTransfer(previewEntry, previewDest)
+	_, previewErr := PreviewTransfer(previewEntry, previewDest, ffcfg.OnConflictError)
 	if previewErr == nil {
 		t.Fatal("PreviewTransfer: expected error for differing destination, got nil")
 	}
 
 	moveDest, moveEntry := seed(t)
-	_, moveErr := TransferEntry(moveEntry, moveDest, ffcfg.OperationMove)
+	_, moveErr := TransferEntry(moveEntry, moveDest, ffcfg.OperationMove, ffcfg.OnConflictError)
 	if moveErr == nil {
 		t.Fatal("TransferEntry: expected error for differing destination, got nil")
 	}
@@ -349,5 +352,209 @@ func TestCollisionErrorIdenticalInBothModes(t *testing.T) {
 	}
 	if got, want := normalize(moveErr, moveDest), normalize(previewErr, previewDest); got != want {
 		t.Errorf("TransferEntry error = %q; want the same as PreviewTransfer's %q", got, want)
+	}
+}
+
+// jpegOf renders a solid-grey JPEG of the given size. Dimensions are what the
+// keep-largest policy judges on, and the fill lets two images of the same size
+// differ in content.
+func jpegOf(t *testing.T, w, h int, fill uint8) []byte {
+	t.Helper()
+	img := image.NewGray(image.Rect(0, 0, w, h))
+	for i := range img.Pix {
+		img.Pix[i] = fill
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, nil); err != nil {
+		t.Fatalf("encode jpeg: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func altOf(dest string) string {
+	ext := filepath.Ext(dest)
+	return strings.TrimSuffix(dest, ext) + "-alt" + ext
+}
+
+// TestKeepLargestSetsAsideSmallerDestination is the Picasa-crop case: the
+// original arrives and finds a smaller edit already holding its target path.
+// The original takes the path and the crop is renamed beside it.
+func TestKeepLargestSetsAsideSmallerDestination(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "2016-12-21-19-41-38.jpg")
+	crop := jpegOf(t, 64, 64, 0x40)
+	if err := os.WriteFile(dest, crop, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original := jpegOf(t, 256, 192, 0x80)
+	e := &fakeEntry{name: "IMG_20161221_194137.jpg", bodies: [][]byte{original}}
+
+	res, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepLargest)
+	if err != nil {
+		t.Fatalf("TransferEntry: %v", err)
+	}
+	if res.Outcome != DestSetAside {
+		t.Fatalf("Outcome = %v; want DestSetAside", res.Outcome)
+	}
+	if res.AltPath != altOf(dest) {
+		t.Errorf("AltPath = %q; want %q", res.AltPath, altOf(dest))
+	}
+	if got, _ := os.ReadFile(dest); !bytes.Equal(got, original) {
+		t.Error("target path does not hold the original")
+	}
+	if got, _ := os.ReadFile(res.AltPath); !bytes.Equal(got, crop) {
+		t.Error("alt path does not hold the crop")
+	}
+	if !e.deleted {
+		t.Error("source was not deleted after a move")
+	}
+}
+
+// TestKeepLargestSetsAsideSmallerSource is the mirror image: the incoming file
+// is the crop, so the original at the target path is left strictly alone and
+// the crop is filed under the alt name.
+func TestKeepLargestSetsAsideSmallerSource(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "2016-12-21-19-41-38.jpg")
+	original := jpegOf(t, 256, 192, 0x80)
+	if err := os.WriteFile(dest, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	crop := jpegOf(t, 64, 64, 0x40)
+	e := &fakeEntry{name: "crop.jpg", bodies: [][]byte{crop}}
+
+	res, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepLargest)
+	if err != nil {
+		t.Fatalf("TransferEntry: %v", err)
+	}
+	if res.Outcome != SourceSetAside {
+		t.Fatalf("Outcome = %v; want SourceSetAside", res.Outcome)
+	}
+	if got, _ := os.ReadFile(dest); !bytes.Equal(got, original) {
+		t.Error("the original at the target path was disturbed")
+	}
+	if got, _ := os.ReadFile(res.AltPath); !bytes.Equal(got, crop) {
+		t.Error("alt path does not hold the crop")
+	}
+}
+
+// TestKeepLargestIsIdempotent guards against -alt2, -alt3 piling up: importing
+// the same crop again finds it already parked and treats it as a duplicate.
+func TestKeepLargestIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "shot.jpg")
+	if err := os.WriteFile(dest, jpegOf(t, 256, 192, 0x80), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	crop := jpegOf(t, 64, 64, 0x40)
+
+	first := &fakeEntry{name: "crop.jpg", bodies: [][]byte{crop}}
+	if _, err := TransferEntry(first, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepLargest); err != nil {
+		t.Fatalf("first transfer: %v", err)
+	}
+	second := &fakeEntry{name: "crop.jpg", bodies: [][]byte{crop}}
+	res, err := TransferEntry(second, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepLargest)
+	if err != nil {
+		t.Fatalf("second transfer: %v", err)
+	}
+	if res.Outcome != Deduplicated {
+		t.Fatalf("Outcome = %v; want Deduplicated", res.Outcome)
+	}
+	if res.AltPath != altOf(dest) {
+		t.Errorf("AltPath = %q; want %q", res.AltPath, altOf(dest))
+	}
+	if !second.deleted {
+		t.Error("duplicate source was not deleted")
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 2 {
+		names := []string{}
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("directory holds %v; want just the original and one -alt", names)
+	}
+}
+
+// TestKeepLargestDeclinesWhenItCannotSee covers the deliberate limits of the
+// policy: same pixel count, or content whose dimensions cannot be read, falls
+// back to the untouched-and-report behaviour.
+func TestKeepLargestDeclinesWhenItCannotSee(t *testing.T) {
+	cases := map[string]struct{ destBody, srcBody []byte }{
+		"equal dimensions": {jpegOf(t, 128, 128, 0x20), jpegOf(t, 128, 128, 0x90)},
+		"not an image":     {[]byte("destination bytes"), []byte("source bytes!!!!!")},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			dest := filepath.Join(dir, "shot.jpg")
+			if err := os.WriteFile(dest, tc.destBody, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			e := &fakeEntry{name: "src.jpg", bodies: [][]byte{tc.srcBody}}
+
+			if _, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepLargest); err == nil {
+				t.Fatal("expected an error, got none")
+			}
+			if got, _ := os.ReadFile(dest); !bytes.Equal(got, tc.destBody) {
+				t.Error("destination was modified")
+			}
+			if e.deleted {
+				t.Error("source was deleted")
+			}
+			if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+				t.Errorf("directory gained files: %d entries", len(entries))
+			}
+		})
+	}
+}
+
+// TestPreviewMatchesKeepLargestTransfer pins the dry run to the real run: the
+// preview must announce the same resolution and change nothing.
+func TestPreviewMatchesKeepLargestTransfer(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "shot.jpg")
+	crop := jpegOf(t, 64, 64, 0x40)
+	if err := os.WriteFile(dest, crop, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original := jpegOf(t, 256, 192, 0x80)
+	e := &fakeEntry{name: "src.jpg", bodies: [][]byte{original}}
+
+	res, err := PreviewTransfer(e, dest, ffcfg.OnConflictKeepLargest)
+	if err != nil {
+		t.Fatalf("PreviewTransfer: %v", err)
+	}
+	if res.Outcome != DestSetAside || res.AltPath != altOf(dest) {
+		t.Errorf("preview = %+v; want DestSetAside at %s", res, altOf(dest))
+	}
+	if res.Detail == "" {
+		t.Error("preview gave no reason for the set-aside")
+	}
+	if got, _ := os.ReadFile(dest); !bytes.Equal(got, crop) {
+		t.Error("preview modified the destination")
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("preview created files: %d entries", len(entries))
+	}
+	if e.deleted {
+		t.Error("preview deleted the source")
+	}
+}
+
+// TestErrorPolicyStillRefuses keeps the default honest: without an opt-in, a
+// colliding rendition is still a hands-off error.
+func TestErrorPolicyStillRefuses(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "shot.jpg")
+	if err := os.WriteFile(dest, jpegOf(t, 64, 64, 0x40), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := &fakeEntry{name: "src.jpg", bodies: [][]byte{jpegOf(t, 256, 192, 0x80)}}
+	if _, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictError); err == nil {
+		t.Fatal("expected an error under the default policy")
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("directory gained files: %d entries", len(entries))
 	}
 }

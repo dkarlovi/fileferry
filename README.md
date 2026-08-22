@@ -60,7 +60,31 @@ profiles:
 ```
 
   Either way the destination is verified by SHA-256 before anything is finalized, and a destination that already holds an identical file is reported as a duplicate (with a move, the redundant source is deleted; with a copy, nothing happens) — so re-running a `copy` profile is safe and idempotent. A destination that exists with *different* content is always an error that leaves both files untouched.
+- `on_conflict` is either `error` (the default) or `keep-largest`; see "Conflicting renditions" below.
 - `types` names are hierarchical: a type also covers its subtypes, so `image` matches standard images *and* RAW files (`image.raw`), while `image.raw` matches RAW files only. Consequently the same path cannot use `image` in one profile and `image.raw` in another — they would both claim the same files.
+
+### Conflicting renditions (`on_conflict`)
+
+Two *different* files can want the same target name — most often a camera original and an edit of the same shot (a Picasa or Lightroom crop keeps the original's `DateTimeOriginal`, `Make` and `Model`, so the template resolves both to the same path). By default that is an error and both files are left untouched, because picking a winner is usually a human decision.
+
+Set `on_conflict: keep-largest` on a profile when the answer is always "the original wins":
+
+```yaml
+profiles:
+  Pictures:
+    on_conflict: keep-largest   # default: error
+    sources:
+      - path: /path/to/pictures
+        types: [image]
+    target:
+      path: /organized/{meta.taken.year}/{meta.taken.date}/{meta.taken.datetime}.{file.extension}
+```
+
+The rendition with more pixels keeps the target path; the smaller one (the crop, the downscaled export) is parked beside it as `<name>-alt.<ext>`, then `-alt2`, `-alt3`. It works in both directions — an incoming crop is filed under the alt name and the original at the target path is never touched — so a smaller rendition can never displace a bigger one regardless of import order.
+
+Two deliberate limits: if either side's dimensions cannot be read (RAW, HEIC — Go decodes JPEG/PNG/GIF headers only) or the two have the same pixel count, the policy declines to guess and falls back to the error, leaving both files alone. And re-importing a crop that is already parked is recognised as a duplicate rather than filed again, so repeated runs don't accumulate `-alt2`, `-alt3`.
+
+`run --on-conflict=error|keep-largest` overrides every profile for a single run.
 
 ### Android phone (MTP) sources — Windows only
 
