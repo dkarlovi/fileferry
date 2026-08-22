@@ -10,11 +10,32 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Operation is what a source does with the files it claims.
+type Operation string
+
+const (
+	// OperationMove transfers the file to the target and removes the source.
+	// This is the default: a source is normally an inbox being drained.
+	OperationMove Operation = "move"
+	// OperationCopy transfers the file to the target and leaves the source in
+	// place, for sources that are a library rather than an inbox.
+	OperationCopy Operation = "copy"
+)
+
 type SourceConfig struct {
-	Path      string   `yaml:"path"`
-	Recurse   bool     `yaml:"recurse"`
-	Types     []string `yaml:"types"`
-	Filenames []string `yaml:"filenames,omitempty"`
+	Path      string    `yaml:"path"`
+	Recurse   bool      `yaml:"recurse"`
+	Types     []string  `yaml:"types"`
+	Filenames []string  `yaml:"filenames,omitempty"`
+	Operation Operation `yaml:"operation,omitempty"`
+}
+
+// Op returns the source's operation, defaulting to move when unset.
+func (s SourceConfig) Op() Operation {
+	if s.Operation == "" {
+		return OperationMove
+	}
+	return s.Operation
 }
 
 type TargetPathConfig struct {
@@ -58,6 +79,11 @@ func LoadConfig(path string) (*Config, error) {
 		for _, src := range prof.Sources {
 			if src.Path == "" {
 				return nil, fmt.Errorf("profile %q: source path is empty", profName)
+			}
+			switch src.Operation {
+			case "", OperationMove, OperationCopy:
+			default:
+				return nil, fmt.Errorf("profile %q: source %q: unknown operation %q (want %q or %q)", profName, src.Path, src.Operation, OperationMove, OperationCopy)
 			}
 			// Validate MTP device URLs up front for a clear error before scanning.
 			if mtp.IsURL(src.Path) {
