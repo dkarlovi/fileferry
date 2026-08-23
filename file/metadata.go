@@ -92,20 +92,20 @@ func extractImageMetadata(path string) (*FileMetadata, error) {
 func extractImageMetadataFromEntry(e Entry) (*FileMetadata, error) {
 	meta := &FileMetadata{Extension: normalizeExt(filepath.Ext(e.Name()))}
 
+	// The extension only hints at the container. Files are routinely misnamed —
+	// an iPhone JPEG saved as .HEIC is common — so the reader the extension
+	// suggests is tried first and the other one runs as a fallback. Each reader
+	// leaves meta untouched when the content isn't its format, so trying both
+	// costs nothing but a second read.
+	readers := []func(Entry, *FileMetadata){applyStreamedExif, applyHEIFExif}
 	if isHEIF(meta.Extension) {
-		// HEIC/HEIF keeps its EXIF in a container item rather than at the head
-		// of the file, so it needs random access to locate it.
-		if ra, size, cleanup, err := asReaderAt(e); err == nil {
-			defer cleanup()
-			if r, err := heicExifReader(ra, size); err == nil {
-				applyExif(r, meta)
-			}
+		readers[0], readers[1] = readers[1], readers[0]
+	}
+	for _, read := range readers {
+		read(e, meta)
+		if meta.TakenTime != nil {
+			break
 		}
-	} else if rc, err := e.Open(); err == nil {
-		func() {
-			defer rc.Close()
-			applyExif(rc, meta)
-		}()
 	}
 
 	// Fallback to exiftool if direct EXIF reading failed or didn't get all data.
@@ -127,6 +127,34 @@ func extractImageMetadataFromEntry(e Entry) (*FileMetadata, error) {
 	}
 
 	return meta, nil
+}
+
+// applyStreamedExif fills meta from EXIF at the head of the stream, which is
+// where JPEG and TIFF-based RAW (DNG, ARW, …) keep it. Streaming works over any
+// source, including MTP.
+func applyStreamedExif(e Entry, meta *FileMetadata) {
+	rc, err := e.Open()
+	if err != nil {
+		return
+	}
+	defer rc.Close()
+	applyExif(rc, meta)
+}
+
+// applyHEIFExif fills meta from the EXIF item of an ISO-BMFF still image.
+// HEIC/HEIF keeps its EXIF in a container item rather than at the head of the
+// file, so locating it needs random access.
+func applyHEIFExif(e Entry, meta *FileMetadata) {
+	ra, size, cleanup, err := asReaderAt(e)
+	if err != nil {
+		return
+	}
+	defer cleanup()
+	r, err := heicExifReader(ra, size)
+	if err != nil {
+		return
+	}
+	applyExif(r, meta)
 }
 
 // isHEIF reports whether a normalized extension is an ISO-BMFF still image.

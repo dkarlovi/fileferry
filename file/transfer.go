@@ -24,11 +24,11 @@ const (
 	// left alone. This is not the happy path for a move (it means a duplicate was
 	// downloaded), but it is not an error either.
 	Deduplicated
-	// SourceSetAside means the target path was already held by a *larger*
+	// SourceSetAside means the target path was already held by a *better*
 	// rendition of the same shot, so the source lost it and was stored under an
 	// "-alt" name next to it.
 	SourceSetAside
-	// DestSetAside means the source was the larger rendition, so the file already
+	// DestSetAside means the source was the better rendition, so the file already
 	// at the target path was renamed to an "-alt" name and the source took its
 	// place.
 	DestSetAside
@@ -43,8 +43,8 @@ type TransferResult struct {
 	// AltHolds reports that the alt slot already holds an identical copy of the
 	// losing rendition, so nothing needs to be written there.
 	AltHolds bool
-	// Detail is a human-readable reason for a set-aside, e.g. which rendition
-	// won and by what dimensions. Empty for the ordinary outcomes.
+	// Detail is a human-readable reason for a set-aside: which rendition won and
+	// on which signal. Empty for the ordinary outcomes.
 	Detail string
 }
 
@@ -63,7 +63,8 @@ type TransferResult struct {
 // If a file already exists at destPath it is reconciled rather than
 // overwritten: identical content is a duplicate (see planExisting), and
 // differing content is resolved according to policy — reported as an error, or
-// settled in favour of the larger rendition under config.OnConflictKeepLargest.
+// settled in favour of the better rendition under
+// config.OnConflictKeepHighestQuality.
 func TransferEntry(entry Entry, destPath string, op ffcfg.Operation, policy ffcfg.OnConflict) (TransferResult, error) {
 	destDir := filepath.Dir(destPath)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -112,15 +113,15 @@ func applyPlan(entry Entry, destPath string, op ffcfg.Operation, plan TransferRe
 		return plan, nil
 
 	case SourceSetAside:
-		// The target path belongs to a larger rendition; this one goes beside it.
+		// The target path belongs to a better rendition; this one goes beside it.
 		if err := transferTo(entry, plan.AltPath, op); err != nil {
 			return TransferResult{}, err
 		}
 		return plan, nil
 
 	case DestSetAside:
-		// The source is the larger rendition, so the smaller file vacates the
-		// target path first. When an identical copy is already parked at the alt
+		// The source is the better rendition, so the loser vacates the target
+		// path first. When an identical copy is already parked at the alt
 		// slot, the file at destPath is a proven duplicate of it and is simply
 		// removed instead of taking a second slot.
 		if plan.AltHolds {
@@ -204,13 +205,13 @@ func PreviewTransfer(entry Entry, destPath string, policy ffcfg.OnConflict) (Tra
 // touching nothing. Identical content is a duplicate. Differing content is a
 // collision between two different files that want the same name — under
 // config.OnConflictError that is simply an error, and under
-// config.OnConflictKeepLargest it is settled by pixel count: the rendition with
-// more pixels is the original and keeps the target path, the smaller one (a
-// crop, a downscaled export) is parked under an "-alt" name beside it.
+// config.OnConflictKeepHighestQuality it is settled by compareRenditions: the
+// better rendition keeps the target path and the other is parked under an "-alt"
+// name beside it, so neither is ever lost.
 //
-// The policy deliberately declines to guess when it cannot see: if either side's
-// dimensions are unreadable (RAW, HEIC) or the two are equal, it falls back to
-// the error, leaving both files untouched.
+// The policy only declines to guess when the two are indistinguishable on every
+// signal it has, which for differing content means they are the same size down
+// to the byte. Then it falls back to the error, leaving both files untouched.
 func planExisting(entry Entry, destPath string, policy ffcfg.OnConflict) (TransferResult, error) {
 	destHash, err := hashFile(destPath)
 	if err != nil {
@@ -225,17 +226,19 @@ func planExisting(entry Entry, destPath string, policy ffcfg.OnConflict) (Transf
 	}
 
 	conflict := fmt.Errorf("destination %s already exists and differs from source %s (SHA-256 %s != %s); leaving both untouched", destPath, entry.DisplayPath(), destHash, srcHash)
-	if policy != ffcfg.OnConflictKeepLargest {
+	if policy != ffcfg.OnConflictKeepHighestQuality {
 		return TransferResult{}, conflict
 	}
 
-	srcDim, srcOK := renditionOfEntry(entry)
-	dstDim, dstOK := renditionOfFile(destPath)
-	if !srcOK || !dstOK || srcDim.pixels() == dstDim.pixels() {
+	src := renditionOfEntry(entry)
+	dst := renditionOfFile(destPath)
+	cmp, by := compareRenditions(src, dst)
+	if cmp == 0 {
 		return TransferResult{}, conflict
 	}
+	detail := explainRendition(by, src, dst, cmp > 0)
 
-	if srcDim.pixels() < dstDim.pixels() {
+	if cmp < 0 {
 		alt, holds, err := findAltSlot(destPath, srcHash)
 		if err != nil {
 			return TransferResult{}, err
@@ -245,24 +248,38 @@ func planExisting(entry Entry, destPath string, policy ffcfg.OnConflict) (Transf
 			// An identical copy is already parked there; nothing new to write.
 			outcome = Deduplicated
 		}
-		return TransferResult{
-			Outcome:  outcome,
-			AltPath:  alt,
-			AltHolds: holds,
-			Detail:   fmt.Sprintf("source %dx%d is smaller than the %dx%d already at the target path", srcDim.width, srcDim.height, dstDim.width, dstDim.height),
-		}, nil
+		return TransferResult{Outcome: outcome, AltPath: alt, AltHolds: holds, Detail: detail}, nil
 	}
 
 	alt, holds, err := findAltSlot(destPath, destHash)
 	if err != nil {
 		return TransferResult{}, err
 	}
-	return TransferResult{
-		Outcome:  DestSetAside,
-		AltPath:  alt,
-		AltHolds: holds,
-		Detail:   fmt.Sprintf("source %dx%d is larger than the %dx%d at the target path", srcDim.width, srcDim.height, dstDim.width, dstDim.height),
-	}, nil
+	return TransferResult{Outcome: DestSetAside, AltPath: alt, AltHolds: holds, Detail: detail}, nil
+}
+
+// explainRendition puts into words why one rendition beat the other, always
+// phrased from the incoming source's point of view because that is the file the
+// user is watching move.
+func explainRendition(by renditionSignal, src, dst rendition, srcWins bool) string {
+	pick := func(won, lost string) string {
+		if srcWins {
+			return won
+		}
+		return lost
+	}
+	switch by {
+	case signalPixels:
+		return fmt.Sprintf("source %s has %s pixels than the %s at the target path",
+			src.geometry(), pick("more", "fewer"), dst.geometry())
+	case signalQuantization:
+		return fmt.Sprintf("both are %s, but the source is the %s JPEG encode (mean quantization step %.1f vs %.1f)",
+			src.geometry(), pick("finer", "coarser"), src.quant, dst.quant)
+	case signalBytes:
+		return fmt.Sprintf("nothing but size separates them: the source is the %s encode (%s vs %s)",
+			pick("larger", "smaller"), HumanSize(src.bytes), HumanSize(dst.bytes))
+	}
+	return "the two renditions could not be told apart"
 }
 
 // maxAltSlots caps the "-alt" search so a pathological directory cannot spin

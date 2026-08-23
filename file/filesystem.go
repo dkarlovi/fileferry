@@ -28,6 +28,39 @@ func resolveTargetPath(tmpl string, meta *FileMetadata) (string, error) {
 	return path, nil
 }
 
+// templateSatisfiedBy reports whether meta can fill every token tmpl uses.
+//
+// It exists because a rendered path with no leftover tokens is not proof that
+// metadata was complete: an empty value renders as nothing, and
+// normalizeSeparators then collapses the "--" and trims the dangling "-" it
+// left behind, so a missing camera maker is indistinguishable from a template
+// that never asked for one. Callers deciding whether they still need to read
+// the file's content must ask this instead.
+func templateSatisfiedBy(tmpl string, meta *FileMetadata) bool {
+	if meta == nil {
+		return false
+	}
+	for _, token := range tokenPattern.FindAllString(tmpl, -1) {
+		var have bool
+		switch token {
+		case "{meta.taken.year}", "{meta.taken.date}", "{meta.taken.datetime}":
+			have = meta.TakenTime != nil
+		case "{file.extension}":
+			have = meta.Extension != ""
+		case "{meta.camera.maker}":
+			have = meta.CameraMaker != ""
+		case "{meta.camera.model}":
+			have = meta.CameraModel != ""
+		}
+		// An unrecognized token is never satisfied, so the caller falls through
+		// to the slow path and the file is reported as unresolvable there.
+		if !have {
+			return false
+		}
+	}
+	return true
+}
+
 // hasUnpopulatedTokens checks if a path still contains unpopulated template tokens
 // It looks for patterns like {token.name} where braces are properly paired.
 // Note: This intentionally matches any {*} pattern, not just known template tokens,

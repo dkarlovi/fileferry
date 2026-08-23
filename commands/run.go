@@ -19,7 +19,7 @@ var runCmd = &console.Command{
 	},
 	Flags: []console.Flag{
 		&console.BoolFlag{Name: "ack", Usage: "Actually move/copy files"},
-		&console.StringFlag{Name: "on-conflict", Usage: `Override every profile's conflict policy for this run: <info>error</> (leave both files untouched) or <info>keep-largest</> (the larger rendition keeps the target path, the smaller is set aside under an "-alt" name)`},
+		&console.StringFlag{Name: "on-conflict", Usage: `Override every profile's conflict policy for this run: <info>error</> (leave both files untouched) or <info>keep-highest-quality</> (the better rendition keeps the target path, the other is set aside under an "-alt" name)`},
 	},
 	Action: func(c *console.Context) error {
 		cfg, err := ffconfig.LoadConfigPrefer(c.String("config"))

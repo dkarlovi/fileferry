@@ -48,11 +48,13 @@ const (
 	// This is the default: two different photos wanting the same name is
 	// normally a question only a human can answer.
 	OnConflictError OnConflict = "error"
-	// OnConflictKeepLargest gives the target path to whichever rendition has the
-	// most pixels — the original — and parks the smaller one (a crop, a
-	// downscaled export) alongside it under an "-alt" name. Renditions whose
-	// dimensions are unknown or equal fall back to OnConflictError.
-	OnConflictKeepLargest OnConflict = "keep-largest"
+	// OnConflictKeepHighestQuality gives the target path to the better of the two
+	// renditions and parks the other alongside it under an "-alt" name, so
+	// neither is lost. "Better" cascades through pixel count (an original beats a
+	// crop or a downscale), then JPEG quantization (the finer encode beats a
+	// recompression of the same geometry), then encoded size. Only renditions
+	// that match on every one of those fall back to OnConflictError.
+	OnConflictKeepHighestQuality OnConflict = "keep-highest-quality"
 )
 
 type TargetPathConfig struct {
@@ -79,10 +81,10 @@ func (p ProfileConfig) Conflict() OnConflict {
 // line or in the config file.
 func ParseOnConflict(name string) (OnConflict, error) {
 	switch OnConflict(name) {
-	case OnConflictError, OnConflictKeepLargest:
+	case OnConflictError, OnConflictKeepHighestQuality:
 		return OnConflict(name), nil
 	}
-	return "", fmt.Errorf("unknown conflict policy %q (want %q or %q)", name, OnConflictError, OnConflictKeepLargest)
+	return "", fmt.Errorf("unknown conflict policy %q (want %q or %q)", name, OnConflictError, OnConflictKeepHighestQuality)
 }
 
 type Config struct {

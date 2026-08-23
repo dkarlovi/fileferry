@@ -60,19 +60,19 @@ profiles:
 ```
 
   Either way the destination is verified by SHA-256 before anything is finalized, and a destination that already holds an identical file is reported as a duplicate (with a move, the redundant source is deleted; with a copy, nothing happens) — so re-running a `copy` profile is safe and idempotent. A destination that exists with *different* content is always an error that leaves both files untouched.
-- `on_conflict` is either `error` (the default) or `keep-largest`; see "Conflicting renditions" below.
+- `on_conflict` is either `error` (the default) or `keep-highest-quality`; see "Conflicting renditions" below.
 - `types` names are hierarchical: a type also covers its subtypes, so `image` matches standard images *and* RAW files (`image.raw`), while `image.raw` matches RAW files only. Consequently the same path cannot use `image` in one profile and `image.raw` in another — they would both claim the same files.
 
 ### Conflicting renditions (`on_conflict`)
 
 Two *different* files can want the same target name — most often a camera original and an edit of the same shot (a Picasa or Lightroom crop keeps the original's `DateTimeOriginal`, `Make` and `Model`, so the template resolves both to the same path). By default that is an error and both files are left untouched, because picking a winner is usually a human decision.
 
-Set `on_conflict: keep-largest` on a profile when the answer is always "the original wins":
+Set `on_conflict: keep-highest-quality` on a profile when the answer is always "the better copy wins":
 
 ```yaml
 profiles:
   Pictures:
-    on_conflict: keep-largest   # default: error
+    on_conflict: keep-highest-quality   # default: error
     sources:
       - path: /path/to/pictures
         types: [image]
@@ -80,11 +80,19 @@ profiles:
       path: /organized/{meta.taken.year}/{meta.taken.date}/{meta.taken.datetime}.{file.extension}
 ```
 
-The rendition with more pixels keeps the target path; the smaller one (the crop, the downscaled export) is parked beside it as `<name>-alt.<ext>`, then `-alt2`, `-alt3`. It works in both directions — an incoming crop is filed under the alt name and the original at the target path is never touched — so a smaller rendition can never displace a bigger one regardless of import order.
+The better rendition keeps the target path; the other is parked beside it as `<name>-alt.<ext>`, then `-alt2`, `-alt3`. **Nothing is ever discarded** — the policy only decides which of the two gets the tidy name. It works in both directions, so import order cannot change the outcome.
 
-Two deliberate limits: if either side's dimensions cannot be read (RAW, HEIC — Go decodes JPEG/PNG/GIF headers only) or the two have the same pixel count, the policy declines to guess and falls back to the error, leaving both files alone. And re-importing a crop that is already parked is recognised as a duplicate rather than filed again, so repeated runs don't accumulate `-alt2`, `-alt3`.
+"Better" is decided by a cascade, stopping at the first signal that separates the two:
 
-`run --on-conflict=error|keep-largest` overrides every profile for a single run.
+1. **Pixel count.** More pixels wins. An original beats a crop or a downscaled export, and it wins regardless of how either file was encoded — detail thrown away by cropping is gone for good, while detail thrown away by compression is merely degraded.
+2. **JPEG quantization.** When the geometry matches, the encoders' quantization tables are compared and the finer encode wins. This is what catches a re-compressed copy of a shot you already filed — a photo that came back down from a cloud service or a chat app is pixel-for-pixel the same size as the original but has been through another lossy pass, which nothing about its dimensions reveals.
+3. **Encoded size.** The larger file wins. This is the last resort and the only signal available for formats whose headers cannot be read at all (RAW, HEIC — Go decodes JPEG/PNG/GIF headers only).
+
+Only two files that match on *every* one of those — same dimensions, same quantization, identical byte count, yet different content — fall back to the error and are left untouched, because at that point picking a winner would be a coin toss.
+
+Re-importing a rendition that is already parked is recognised as a duplicate rather than filed again, so repeated runs don't accumulate `-alt2`, `-alt3`.
+
+`run --on-conflict=error|keep-highest-quality` overrides every profile for a single run.
 
 ### Android phone (MTP) sources — Windows only
 
