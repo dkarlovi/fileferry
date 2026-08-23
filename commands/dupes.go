@@ -60,7 +60,7 @@ Dry-run by default; pass --ack to actually delete.`,
 
 			for _, set := range rep.Sets {
 				sets++
-				fmt.Fprintf(c.App.Writer, "Duplicate in <comment>%s</> (%s, sha256 %s)\n", set.Dir, humanSize(set.Size), set.Hash[:12])
+				fmt.Fprintf(c.App.Writer, "Duplicate in <comment>%s</> (%s, sha256 %s)\n", set.Dir, fffile.HumanSize(set.Size), set.Hash[:12])
 				if set.Reason == fffile.KeepCanonical {
 					fmt.Fprintf(c.App.Writer, "  keep   <info>%s</> (matches the target template)\n", filepath.Base(set.Keep))
 				} else {
@@ -99,7 +99,7 @@ Dry-run by default; pass --ack to actually delete.`,
 		if ack {
 			verb = "deleted"
 		}
-		summary := fmt.Sprintf("Summary: %s, %s %s (%s)", plural(sets, "duplicate set"), verb, plural(deleted, "file"), humanSize(freed))
+		summary := fmt.Sprintf("Summary: %s, %s %s (%s)", plural(sets, "duplicate set"), verb, plural(deleted, "file"), fffile.HumanSize(freed))
 		if pendingRename > 0 {
 			summary += fmt.Sprintf(", %s still need a rename", plural(pendingRename, "set"))
 		}
@@ -115,19 +115,4 @@ func plural(n int, noun string) string {
 		return fmt.Sprintf("%d %s", n, noun)
 	}
 	return fmt.Sprintf("%d %ss", n, noun)
-}
-
-// humanSize renders a byte count in the largest binary unit that keeps it
-// readable, e.g. "100.0 MiB".
-func humanSize(size int64) string {
-	const unit = 1024
-	if size < unit {
-		return fmt.Sprintf("%d B", size)
-	}
-	div, exp := int64(unit), 0
-	for n := size / unit; n >= unit && exp < 4; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(size)/float64(div), "KMGTP"[exp])
 }

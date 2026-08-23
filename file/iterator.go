@@ -206,8 +206,13 @@ func processFile(entry Entry, src ffcfg.SourceConfig, profileName string, cfg *f
 	// don't read the file's content. This matters over MTP, where opening a file
 	// streams it in full — reading EXIF from a multi-MB RAW just to learn a date
 	// the filename already carries would be wasteful.
-	if meta != nil {
-		if targetPath, err := resolveTargetPath(targetTmpl, meta); err == nil && !hasUnpopulatedTokens(targetPath) {
+	//
+	// The test is on the metadata, not on the rendered path: a template asking
+	// for a camera the filename cannot supply renders cleanly anyway (see
+	// templateSatisfiedBy), and taking the fast path there would silently drop
+	// the camera name that EXIF was about to provide.
+	if templateSatisfiedBy(targetTmpl, meta) {
+		if targetPath, err := resolveTargetPath(targetTmpl, meta); err == nil {
 			file.Metadata = meta
 			setOp(&file, entry, targetPath)
 			return file

@@ -1,6 +1,9 @@
 package file
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -328,4 +331,87 @@ func TestExtractImageMetadataWithExiftool(t *testing.T) {
 			t.Logf("extractImageMetadataWithExiftool() = %+v, expected nil (exiftool may not be installed)", got)
 		}
 	})
+}
+
+// tiffWithDateTime builds a minimal big-endian TIFF block whose IFD0 carries a
+// DateTime (0x0132) and a Make (0x010f) tag — enough for goexif to read a date
+// and a camera maker out of it.
+func tiffWithDateTime(dateTime, maker string) []byte {
+	const (
+		header = 8
+		entry  = 12
+		count  = 2
+	)
+	// Values longer than 4 bytes live after the IFD and are referenced by offset.
+	ifdEnd := header + 2 + count*entry + 4
+	dt := append([]byte(dateTime), 0)
+	mk := append([]byte(maker), 0)
+
+	buf := new(bytes.Buffer)
+	buf.WriteString("MM\x00\x2a")
+	buf.Write(be32(header))
+	buf.Write(be16(count))
+	writeEntry := func(tag uint16, n int, offset int) {
+		buf.Write(be16(tag))
+		buf.Write(be16(2)) // ASCII
+		buf.Write(be32(uint32(n)))
+		buf.Write(be32(uint32(offset)))
+	}
+	writeEntry(0x010f, len(mk), ifdEnd)
+	writeEntry(0x0132, len(dt), ifdEnd+len(mk))
+	buf.Write(be32(0)) // no next IFD
+	buf.Write(mk)
+	buf.Write(dt)
+	return buf.Bytes()
+}
+
+// jpegWithExif wraps a TIFF block in the APP1 segment of a minimal JPEG.
+func jpegWithExif(tiff []byte) []byte {
+	app1 := append([]byte("Exif\x00\x00"), tiff...)
+	out := []byte{0xff, 0xd8, 0xff, 0xe1}
+	out = append(out, be16(uint16(len(app1)+2))...)
+	out = append(out, app1...)
+	return append(out, 0xff, 0xd9)
+}
+
+// TestExtractImageMetadataMisnamedContainer covers files whose extension lies
+// about their container — most commonly an iPhone JPEG saved as .HEIC. The
+// EXIF must be found either way, so neither reader may be selected on the
+// extension alone.
+func TestExtractImageMetadataMisnamedContainer(t *testing.T) {
+	tiff := tiffWithDateTime("2019:07:21 14:57:57", "Apple")
+	want := time.Date(2019, 7, 21, 14, 57, 57, 0, time.Local)
+
+	tests := []struct {
+		name     string
+		filename string
+		content  []byte
+	}{
+		{"jpeg named .jpg", "IMG_1.jpg", jpegWithExif(tiff)},
+		{"jpeg named .HEIC", "IMG_2.HEIC", jpegWithExif(tiff)},
+		{"heif named .heic", "IMG_3.heic", buildHEIF(exifPayload(tiff))},
+		{"heif named .jpg", "IMG_4.jpg", buildHEIF(exifPayload(tiff))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), tt.filename)
+			if err := os.WriteFile(path, tt.content, 0644); err != nil {
+				t.Fatal(err)
+			}
+			got, err := extractImageMetadata(path)
+			if err != nil {
+				t.Fatalf("extractImageMetadata() error = %v", err)
+			}
+			if got.TakenTime == nil {
+				t.Fatal("extractImageMetadata() TakenTime = nil, want a date from EXIF")
+			}
+			if !got.TakenTime.Equal(want) {
+				t.Errorf("extractImageMetadata() TakenTime = %v, want %v", got.TakenTime, want)
+			}
+			if got.CameraMaker != "Apple" {
+				t.Errorf("extractImageMetadata() CameraMaker = %q, want %q", got.CameraMaker, "Apple")
+			}
+		})
+	}
 }

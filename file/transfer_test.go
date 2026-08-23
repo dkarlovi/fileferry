@@ -355,17 +355,25 @@ func TestCollisionErrorIdenticalInBothModes(t *testing.T) {
 	}
 }
 
-// jpegOf renders a solid-grey JPEG of the given size. Dimensions are what the
-// keep-largest policy judges on, and the fill lets two images of the same size
-// differ in content.
+// jpegOf renders a solid-grey JPEG of the given size at the encoder's default
+// quality. Dimensions are the first thing the keep-highest-quality policy
+// judges on, and the fill lets two images of the same size differ in content.
 func jpegOf(t *testing.T, w, h int, fill uint8) []byte {
+	t.Helper()
+	return jpegOfQuality(t, w, h, fill, jpeg.DefaultQuality)
+}
+
+// jpegOfQuality is jpegOf with the encoder's quality pinned, for the cases that
+// turn on quantization rather than geometry. A gradient rather than a flat fill
+// keeps the two encodes from collapsing to the same bytes.
+func jpegOfQuality(t *testing.T, w, h int, fill uint8, quality int) []byte {
 	t.Helper()
 	img := image.NewGray(image.Rect(0, 0, w, h))
 	for i := range img.Pix {
-		img.Pix[i] = fill
+		img.Pix[i] = fill + uint8((i*7)%64)
 	}
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, nil); err != nil {
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality}); err != nil {
 		t.Fatalf("encode jpeg: %v", err)
 	}
 	return buf.Bytes()
@@ -376,10 +384,10 @@ func altOf(dest string) string {
 	return strings.TrimSuffix(dest, ext) + "-alt" + ext
 }
 
-// TestKeepLargestSetsAsideSmallerDestination is the Picasa-crop case: the
+// TestKeepHighestQualitySetsAsideSmallerDestination is the Picasa-crop case: the
 // original arrives and finds a smaller edit already holding its target path.
 // The original takes the path and the crop is renamed beside it.
-func TestKeepLargestSetsAsideSmallerDestination(t *testing.T) {
+func TestKeepHighestQualitySetsAsideSmallerDestination(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "2016-12-21-19-41-38.jpg")
 	crop := jpegOf(t, 64, 64, 0x40)
@@ -389,7 +397,7 @@ func TestKeepLargestSetsAsideSmallerDestination(t *testing.T) {
 	original := jpegOf(t, 256, 192, 0x80)
 	e := &fakeEntry{name: "IMG_20161221_194137.jpg", bodies: [][]byte{original}}
 
-	res, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepLargest)
+	res, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepHighestQuality)
 	if err != nil {
 		t.Fatalf("TransferEntry: %v", err)
 	}
@@ -410,10 +418,10 @@ func TestKeepLargestSetsAsideSmallerDestination(t *testing.T) {
 	}
 }
 
-// TestKeepLargestSetsAsideSmallerSource is the mirror image: the incoming file
+// TestKeepHighestQualitySetsAsideSmallerSource is the mirror image: the incoming file
 // is the crop, so the original at the target path is left strictly alone and
 // the crop is filed under the alt name.
-func TestKeepLargestSetsAsideSmallerSource(t *testing.T) {
+func TestKeepHighestQualitySetsAsideSmallerSource(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "2016-12-21-19-41-38.jpg")
 	original := jpegOf(t, 256, 192, 0x80)
@@ -423,7 +431,7 @@ func TestKeepLargestSetsAsideSmallerSource(t *testing.T) {
 	crop := jpegOf(t, 64, 64, 0x40)
 	e := &fakeEntry{name: "crop.jpg", bodies: [][]byte{crop}}
 
-	res, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepLargest)
+	res, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepHighestQuality)
 	if err != nil {
 		t.Fatalf("TransferEntry: %v", err)
 	}
@@ -438,9 +446,9 @@ func TestKeepLargestSetsAsideSmallerSource(t *testing.T) {
 	}
 }
 
-// TestKeepLargestIsIdempotent guards against -alt2, -alt3 piling up: importing
+// TestKeepHighestQualityIsIdempotent guards against -alt2, -alt3 piling up: importing
 // the same crop again finds it already parked and treats it as a duplicate.
-func TestKeepLargestIsIdempotent(t *testing.T) {
+func TestKeepHighestQualityIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "shot.jpg")
 	if err := os.WriteFile(dest, jpegOf(t, 256, 192, 0x80), 0o644); err != nil {
@@ -449,11 +457,11 @@ func TestKeepLargestIsIdempotent(t *testing.T) {
 	crop := jpegOf(t, 64, 64, 0x40)
 
 	first := &fakeEntry{name: "crop.jpg", bodies: [][]byte{crop}}
-	if _, err := TransferEntry(first, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepLargest); err != nil {
+	if _, err := TransferEntry(first, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepHighestQuality); err != nil {
 		t.Fatalf("first transfer: %v", err)
 	}
 	second := &fakeEntry{name: "crop.jpg", bodies: [][]byte{crop}}
-	res, err := TransferEntry(second, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepLargest)
+	res, err := TransferEntry(second, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepHighestQuality)
 	if err != nil {
 		t.Fatalf("second transfer: %v", err)
 	}
@@ -476,42 +484,124 @@ func TestKeepLargestIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestKeepLargestDeclinesWhenItCannotSee covers the deliberate limits of the
-// policy: same pixel count, or content whose dimensions cannot be read, falls
-// back to the untouched-and-report behaviour.
-func TestKeepLargestDeclinesWhenItCannotSee(t *testing.T) {
-	cases := map[string]struct{ destBody, srcBody []byte }{
-		"equal dimensions": {jpegOf(t, 128, 128, 0x20), jpegOf(t, 128, 128, 0x90)},
-		"not an image":     {[]byte("destination bytes"), []byte("source bytes!!!!!")},
+// TestKeepHighestQualityPrefersFinerEncode is the recompression case: same
+// shot, same geometry, but one file has been through a lossy re-encode. Only
+// the quantization tables can tell them apart, so this is what the pixel-count
+// test alone used to miss.
+func TestKeepHighestQualityPrefersFinerEncode(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "shot.jpg")
+	recompressed := jpegOfQuality(t, 128, 128, 0x40, 40)
+	if err := os.WriteFile(dest, recompressed, 0o644); err != nil {
+		t.Fatal(err)
 	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			dest := filepath.Join(dir, "shot.jpg")
-			if err := os.WriteFile(dest, tc.destBody, 0o644); err != nil {
-				t.Fatal(err)
-			}
-			e := &fakeEntry{name: "src.jpg", bodies: [][]byte{tc.srcBody}}
+	original := jpegOfQuality(t, 128, 128, 0x40, 95)
+	e := &fakeEntry{name: "src.jpg", bodies: [][]byte{original}}
 
-			if _, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepLargest); err == nil {
-				t.Fatal("expected an error, got none")
-			}
-			if got, _ := os.ReadFile(dest); !bytes.Equal(got, tc.destBody) {
-				t.Error("destination was modified")
-			}
-			if e.deleted {
-				t.Error("source was deleted")
-			}
-			if entries, _ := os.ReadDir(dir); len(entries) != 1 {
-				t.Errorf("directory gained files: %d entries", len(entries))
-			}
-		})
+	res, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepHighestQuality)
+	if err != nil {
+		t.Fatalf("TransferEntry: %v", err)
+	}
+	if res.Outcome != DestSetAside {
+		t.Fatalf("Outcome = %v; want DestSetAside", res.Outcome)
+	}
+	if got, _ := os.ReadFile(dest); !bytes.Equal(got, original) {
+		t.Error("target path does not hold the finer encode")
+	}
+	if got, _ := os.ReadFile(res.AltPath); !bytes.Equal(got, recompressed) {
+		t.Error("alt path does not hold the recompressed copy")
+	}
+	if !strings.Contains(res.Detail, "quantization") {
+		t.Errorf("Detail = %q; want it to name the quantization signal", res.Detail)
 	}
 }
 
-// TestPreviewMatchesKeepLargestTransfer pins the dry run to the real run: the
+// TestKeepHighestQualityPrefersFinerEncodeInReverse is the mirror: the
+// recompressed copy is the one arriving, so it must be parked and the finer
+// encode at the target path left strictly alone.
+func TestKeepHighestQualityPrefersFinerEncodeInReverse(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "shot.jpg")
+	original := jpegOfQuality(t, 128, 128, 0x40, 95)
+	if err := os.WriteFile(dest, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	recompressed := jpegOfQuality(t, 128, 128, 0x40, 40)
+	e := &fakeEntry{name: "src.jpg", bodies: [][]byte{recompressed}}
+
+	res, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepHighestQuality)
+	if err != nil {
+		t.Fatalf("TransferEntry: %v", err)
+	}
+	if res.Outcome != SourceSetAside {
+		t.Fatalf("Outcome = %v; want SourceSetAside", res.Outcome)
+	}
+	if got, _ := os.ReadFile(dest); !bytes.Equal(got, original) {
+		t.Error("the finer encode at the target path was disturbed")
+	}
+}
+
+// TestKeepHighestQualityFallsBackToSize covers content the policy cannot read
+// at all — RAW, HEIC, anything Go has no decoder for. Byte count is the only
+// signal left, and using it still beats leaving the pair unresolved.
+func TestKeepHighestQualityFallsBackToSize(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "shot.dng")
+	small := []byte("a small opaque blob")
+	if err := os.WriteFile(dest, small, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	large := []byte("a considerably longer opaque blob that cannot be decoded")
+	e := &fakeEntry{name: "src.dng", bodies: [][]byte{large}}
+
+	res, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepHighestQuality)
+	if err != nil {
+		t.Fatalf("TransferEntry: %v", err)
+	}
+	if res.Outcome != DestSetAside {
+		t.Fatalf("Outcome = %v; want DestSetAside", res.Outcome)
+	}
+	if got, _ := os.ReadFile(dest); !bytes.Equal(got, large) {
+		t.Error("target path does not hold the larger file")
+	}
+	if got, _ := os.ReadFile(res.AltPath); !bytes.Equal(got, small) {
+		t.Error("alt path does not hold the smaller file")
+	}
+}
+
+// TestKeepHighestQualityDeclinesWhenNothingSeparatesThem is the one remaining
+// way out: two different files that match on every signal the policy has, down
+// to the byte. Picking a winner there would be a coin toss, so it reports.
+func TestKeepHighestQualityDeclinesWhenNothingSeparatesThem(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "shot.jpg")
+	destBody := []byte("destination bytes")
+	srcBody := []byte("source bytes!!!!!") // same length, different content
+	if len(destBody) != len(srcBody) {
+		t.Fatalf("test bodies must be the same size, got %d and %d", len(destBody), len(srcBody))
+	}
+	if err := os.WriteFile(dest, destBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := &fakeEntry{name: "src.jpg", bodies: [][]byte{srcBody}}
+
+	if _, err := TransferEntry(e, dest, ffcfg.OperationMove, ffcfg.OnConflictKeepHighestQuality); err == nil {
+		t.Fatal("expected an error, got none")
+	}
+	if got, _ := os.ReadFile(dest); !bytes.Equal(got, destBody) {
+		t.Error("destination was modified")
+	}
+	if e.deleted {
+		t.Error("source was deleted")
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("directory gained files: %d entries", len(entries))
+	}
+}
+
+// TestPreviewMatchesKeepHighestQualityTransfer pins the dry run to the real run: the
 // preview must announce the same resolution and change nothing.
-func TestPreviewMatchesKeepLargestTransfer(t *testing.T) {
+func TestPreviewMatchesKeepHighestQualityTransfer(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "shot.jpg")
 	crop := jpegOf(t, 64, 64, 0x40)
@@ -521,7 +611,7 @@ func TestPreviewMatchesKeepLargestTransfer(t *testing.T) {
 	original := jpegOf(t, 256, 192, 0x80)
 	e := &fakeEntry{name: "src.jpg", bodies: [][]byte{original}}
 
-	res, err := PreviewTransfer(e, dest, ffcfg.OnConflictKeepLargest)
+	res, err := PreviewTransfer(e, dest, ffcfg.OnConflictKeepHighestQuality)
 	if err != nil {
 		t.Fatalf("PreviewTransfer: %v", err)
 	}

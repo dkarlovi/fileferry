@@ -476,3 +476,68 @@ func TestHasUnpopulatedTokens(t *testing.T) {
 // which are used by the actual application. The logic of scanFiles is straightforward:
 // it walks a directory tree using filepath.Walk and filters files by type using isFileType.
 // Both the filtering logic (isFileType) and path handling are tested above.
+
+func TestTemplateSatisfiedBy(t *testing.T) {
+	taken := time.Date(2019, 6, 1, 17, 26, 42, 0, time.Local)
+	const cameraTmpl = "/out/{meta.taken.year}/{meta.taken.datetime}-{meta.camera.maker}-{meta.camera.model}.{file.extension}"
+
+	tests := []struct {
+		name string
+		tmpl string
+		meta *FileMetadata
+		want bool
+	}{
+		{
+			name: "nil metadata satisfies nothing",
+			tmpl: cameraTmpl,
+			meta: nil,
+			want: false,
+		},
+		{
+			name: "every token has a value",
+			tmpl: cameraTmpl,
+			meta: &FileMetadata{TakenTime: &taken, Extension: "jpg", CameraMaker: "Google", CameraModel: "Pixel"},
+			want: true,
+		},
+		{
+			// The case that matters: a filename pattern yields a date but never a
+			// camera, and rendering hides the gap by collapsing the separators.
+			name: "date only against a template wanting a camera",
+			tmpl: cameraTmpl,
+			meta: &FileMetadata{TakenTime: &taken, Extension: "jpg"},
+			want: false,
+		},
+		{
+			name: "date only against a template wanting only a date",
+			tmpl: "/out/{meta.taken.year}/{meta.taken.datetime}.{file.extension}",
+			meta: &FileMetadata{TakenTime: &taken, Extension: "jpg"},
+			want: true,
+		},
+		{
+			name: "missing taken time",
+			tmpl: "/out/{meta.taken.date}.{file.extension}",
+			meta: &FileMetadata{Extension: "jpg"},
+			want: false,
+		},
+		{
+			name: "template with no tokens",
+			tmpl: "/out/fixed.jpg",
+			meta: &FileMetadata{},
+			want: true,
+		},
+		{
+			name: "unknown token is never satisfied",
+			tmpl: "/out/{meta.nonsense}.{file.extension}",
+			meta: &FileMetadata{TakenTime: &taken, Extension: "jpg"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := templateSatisfiedBy(tt.tmpl, tt.meta); got != tt.want {
+				t.Errorf("templateSatisfiedBy() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
