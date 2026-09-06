@@ -65,7 +65,7 @@ profiles:
 
 ### Conflicting renditions (`on_conflict`)
 
-Two *different* files can want the same target name — most often a camera original and an edit of the same shot (a Picasa or Lightroom crop keeps the original's `DateTimeOriginal`, `Make` and `Model`, so the template resolves both to the same path). By default that is an error and both files are left untouched, because picking a winner is usually a human decision.
+Two *different* files can want the same target name — most often a camera original and a second rendition of the same shot. A Picasa or Lightroom crop keeps the original's `DateTimeOriginal`, `Make` and `Model`; a phone writes its processed version of a clip (Pixel's `.NS-01.COVER.mp4` beside the Night Sight original) with the same capture time in the container. Either way the template resolves both to the same path. By default that is an error and both files are left untouched, because picking a winner is usually a human decision.
 
 Set `on_conflict: keep-highest-quality` on a profile when the answer is always "the better copy wins":
 
@@ -84,9 +84,9 @@ The better rendition keeps the target path; the other is parked beside it as `<n
 
 "Better" is decided by a cascade, stopping at the first signal that separates the two:
 
-1. **Pixel count.** More pixels wins. An original beats a crop or a downscaled export, and it wins regardless of how either file was encoded — detail thrown away by cropping is gone for good, while detail thrown away by compression is merely degraded.
+1. **Pixel count.** More pixels wins. An original beats a crop or a downscaled export, and it wins regardless of how either file was encoded — detail thrown away by cropping is gone for good, while detail thrown away by compression is merely degraded. Images are measured from their header; videos from the container's track headers (`tkhd` for MP4/MOV/3GP, `PixelWidth`/`PixelHeight` for MKV/WebM), taking the largest track, since a phone video's sound and telemetry tracks have no size of their own.
 2. **JPEG quantization.** When the geometry matches, the encoders' quantization tables are compared and the finer encode wins. This is what catches a re-compressed copy of a shot you already filed — a photo that came back down from a cloud service or a chat app is pixel-for-pixel the same size as the original but has been through another lossy pass, which nothing about its dimensions reveals.
-3. **Encoded size.** The larger file wins. This is the last resort and the only signal available for formats whose headers cannot be read at all (RAW, HEIC — Go decodes JPEG/PNG/GIF headers only).
+3. **Encoded size.** The larger file wins. This is the last resort and the only signal available for formats whose headers cannot be read at all (RAW, HEIC — Go decodes JPEG/PNG/GIF headers only, and video geometry is read only from the containers listed above). Note that it is a genuinely weak signal for video: a re-encode can easily outweigh the original, which is why geometry is read from the container rather than left to this.
 
 Only two files that match on *every* one of those — same dimensions, same quantization, identical byte count, yet different content — fall back to the error and are left untouched, because at that point picking a winner would be a coin toss.
 
