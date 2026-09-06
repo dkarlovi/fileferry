@@ -2,9 +2,12 @@ package file
 
 import (
 	"bytes"
+	"encoding/binary"
 	"image"
 	"image/jpeg"
 	"testing"
+
+	mkvparse "github.com/remko/go-mkvparse"
 )
 
 // encodeGray renders a gradient JPEG at a pinned quality. The gradient (rather
@@ -186,5 +189,117 @@ func TestHumanSize(t *testing.T) {
 		if got := HumanSize(size); got != want {
 			t.Errorf("HumanSize(%d) = %q; want %q", size, got, want)
 		}
+	}
+}
+
+// mp4Box wraps a payload in a box header: a big-endian length covering the
+// whole box, then the four-character type.
+func mp4Box(typ string, payload ...[]byte) []byte {
+	body := bytes.Join(payload, nil)
+	box := make([]byte, 8, 8+len(body))
+	binary.BigEndian.PutUint32(box, uint32(8+len(body)))
+	copy(box[4:], typ)
+	return append(box, body...)
+}
+
+// tkhdOf builds a version 0 track header reporting the given display size.
+// Everything else is left at zero except the unity matrix, which go-mp4 still
+// has to read past to reach the size at the end.
+func tkhdOf(w, h int) []byte {
+	p := make([]byte, 84)
+	// [0:4] version and flags, [4:32] times, ids and durations, [32:40] layer,
+	// alternate group, volume and a reserved pair — all zero is valid here.
+	matrix := []uint32{0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000}
+	for i, v := range matrix {
+		binary.BigEndian.PutUint32(p[40+i*4:], v)
+	}
+	// Width and height are 16.16 fixed point.
+	binary.BigEndian.PutUint32(p[76:], uint32(w)<<16)
+	binary.BigEndian.PutUint32(p[80:], uint32(h)<<16)
+	return mp4Box("tkhd", p)
+}
+
+// mp4Of assembles a movie out of one track header per given size.
+func mp4Of(sizes ...[2]int) []byte {
+	traks := [][]byte{}
+	for _, s := range sizes {
+		traks = append(traks, mp4Box("trak", tkhdOf(s[0], s[1])))
+	}
+	return append(mp4Box("ftyp", []byte("isomiso2mp41")), mp4Box("moov", traks...)...)
+}
+
+func TestVideoGeometryReadsMP4TrackHeaders(t *testing.T) {
+	// A real phone video carries the picture alongside tracks that have no
+	// size of their own: sound, and Pixel's "mett" telemetry track. The
+	// picture is the largest of them.
+	body := mp4Of([2]int{0, 0}, [2]int{1920, 1080}, [2]int{0, 0})
+	w, h, ok := videoGeometry(bytes.NewReader(body), int64(len(body)), "mp4")
+	if !ok || w != 1920 || h != 1080 {
+		t.Errorf("videoGeometry() = %dx%d (ok=%v); want 1920x1080", w, h, ok)
+	}
+}
+
+func TestVideoGeometryIgnoresWhatItCannotRead(t *testing.T) {
+	body := mp4Of([2]int{1920, 1080})
+	// The right boxes under the wrong extension are not a video.
+	if _, _, ok := videoGeometry(bytes.NewReader(body), int64(len(body)), "jpg"); ok {
+		t.Error("videoGeometry() read geometry for a jpg; want none")
+	}
+	// Neither is a video extension over content that holds no boxes.
+	junk := []byte("not a container at all")
+	if _, _, ok := videoGeometry(bytes.NewReader(junk), int64(len(junk)), "mp4"); ok {
+		t.Error("videoGeometry() read geometry from junk; want none")
+	}
+	if _, _, ok := videoGeometry(bytes.NewReader(nil), 0, "mp4"); ok {
+		t.Error("videoGeometry() read geometry from an empty file; want none")
+	}
+}
+
+// TestRenditionOfContentRanksVideos is the case this signal exists for: a phone
+// writes a downscaled rendition of a clip next to the original, both carrying
+// the same capture time, so both want the same target name. Byte count alone
+// cannot be trusted to tell them apart — here the derived clip is the larger
+// file — but the pixel count can.
+func TestRenditionOfContentRanksVideos(t *testing.T) {
+	original := mp4Of([2]int{3840, 2160})
+	derived := mp4Of([2]int{1920, 1080})
+
+	orig := renditionOfContent(bytes.NewReader(original), int64(len(original)), "mp4")
+	if !orig.dimsOK || orig.width != 3840 || orig.height != 2160 {
+		t.Fatalf("geometry = %s (ok=%v); want 3840x2160", orig.geometry(), orig.dimsOK)
+	}
+	// Give the derived clip the heavier encode, so only geometry can decide.
+	drv := renditionOfContent(bytes.NewReader(derived), int64(len(derived))*10, "mp4")
+
+	cmp, by := compareRenditions(orig, drv)
+	if cmp <= 0 || by != signalPixels {
+		t.Errorf("compareRenditions() = %d by %v; want the original to win on pixels", cmp, by)
+	}
+}
+
+func TestPixelHandlerKeepsTheLargestTrack(t *testing.T) {
+	h := &pixelHandler{}
+	for _, dims := range [][2]int64{{1920, 1080}, {320, 240}} {
+		if err := h.HandleInteger(mkvparse.PixelWidthElement, dims[0], mkvparse.ElementInfo{}); err != nil {
+			t.Fatalf("HandleInteger(PixelWidth): %v", err)
+		}
+		if err := h.HandleInteger(mkvparse.PixelHeightElement, dims[1], mkvparse.ElementInfo{}); err != nil {
+			t.Fatalf("HandleInteger(PixelHeight): %v", err)
+		}
+	}
+	if err := h.HandleInteger(mkvparse.ElementID(0x1234), 9999, mkvparse.ElementInfo{}); err != nil {
+		t.Fatalf("HandleInteger(other): %v", err)
+	}
+	if h.width != 1920 || h.height != 1080 {
+		t.Errorf("pixelHandler = %dx%d; want 1920x1080", h.width, h.height)
+	}
+
+	// Clusters hold the frames, which is the bulk of the file and none of the
+	// answer, so the parse must not descend into them.
+	if descend, _ := h.HandleMasterBegin(mkvparse.ClusterElement, mkvparse.ElementInfo{}); descend {
+		t.Error("HandleMasterBegin(Cluster) = true; want the parse to skip clusters")
+	}
+	if descend, _ := h.HandleMasterBegin(mkvparse.TracksElement, mkvparse.ElementInfo{}); !descend {
+		t.Error("HandleMasterBegin(Tracks) = false; want the parse to descend")
 	}
 }
